@@ -3,7 +3,7 @@
    a tus instaladores reales (ej. carpeta /downloads o
    GitHub Releases).
    ========================================================= */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 
 const PLATFORMS = [
   {

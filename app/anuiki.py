@@ -39,7 +39,7 @@ from segmentador import DictadoPorSegmentos
 
 # ---------------------------------------------------------------- Ajustes
 APP_NAME = "Anuiki"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 DATA_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / APP_NAME
 CONFIG_FILE = DATA_DIR / "config.json"
 SAMPLE_RATE = 16000
