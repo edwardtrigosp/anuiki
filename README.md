@@ -48,6 +48,16 @@ Requisitos: Python 3.14 y [Inno Setup 6](https://jrsoftware.org/isinfo.php) (sol
    - copia el instalador a `web/downloads/`.
 3. Sube la carpeta `web/` a tu hosting.
 
+## Firma de código
+
+Los instaladores publicados se firman con un certificado gratuito de código abierto, proporcionado por [SignPath.io](https://signpath.io) y emitido por la [SignPath Foundation](https://signpath.org). Solo se firman compilaciones hechas desde este repositorio con GitHub Actions.
+
+Política de privacidad: la aplicación no envía audio ni datos personales a ningún servidor. Solo accede a internet para descargar el modelo de voz la primera vez.
+
+## Licencia
+
+Código bajo licencia [MIT](LICENSE).
+
 ## Licencias de terceros
 
 Modelo de voz: NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0). Conversión ONNX: istupakov/parakeet-tdt-0.6b-v3-onnx (CC BY 4.0).
