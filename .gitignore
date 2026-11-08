@@ -17,3 +17,6 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# Resultados de las pruebas de rendimiento (dependen de la máquina)
+app/tests/resultados/
