@@ -1,0 +1,63 @@
+name: Release firmado
+
+# Se ejecuta al subir una etiqueta, por ejemplo: git tag v1.2.0 && git push --tags
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-sign-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Dependencias
+        run: |
+          python -m pip install -r app/requirements-dev.txt
+          choco install innosetup -y --no-progress
+
+      - name: Compilar (PyInstaller + Inno Setup)
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          Set-Content VERSION $v -NoNewline
+          python -m PyInstaller packaging/Anuiki.spec --distpath dist --workpath build --noconfirm
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" packaging/anuiki.iss
+          New-Item -ItemType Directory -Force unsigned | Out-Null
+          Copy-Item "dist/installer/Anuiki-Setup-$v.exe" unsigned/Anuiki-Setup.exe
+
+      - name: Subir instalador sin firmar
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-sin-firmar
+          path: unsigned/Anuiki-Setup.exe
+
+      # Requiere que SignPath apruebe el proyecto y definir estas variables/secretos
+      # en Settings > Secrets and variables > Actions.
+      - name: Firmar con SignPath
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Publicar release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" signed/Anuiki-Setup.exe `
+            --title "Anuiki ${{ github.ref_name }}" `
+            --notes "Instalador firmado de Anuiki para Windows 10/11 (64 bits)."
