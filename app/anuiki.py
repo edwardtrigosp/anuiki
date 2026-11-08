@@ -27,13 +27,15 @@ import tkinter as tk
 import tkinter.font as tkfont
 import urllib.request
 import winreg
-import winsound
 from ctypes import wintypes
 from pathlib import Path
 
 import keyboard
 import numpy as np
 import sounddevice as sd
+
+import sonidos
+from segmentador import DictadoPorSegmentos
 
 # ---------------------------------------------------------------- Ajustes
 APP_NAME = "Anuiki"
@@ -69,6 +71,8 @@ DEFAULT_CONFIG = {
     "hotkey_hide": "esc",
     "hotkey_history": "",
     "sound": True,
+    "segmentos": True,   # transcribe por trozos mientras se habla (menos espera al terminar)
+    "depurar_audio": False,   # True: guarda los trozos en %LOCALAPPDATA%\Anuiki\debug (solo para diagnóstico)
 }
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,6 +108,8 @@ IC_MIC, IC_UP, IC_DOWN, IC_WARN, IC_RETRY, IC_GEAR, IC_CLOSE = (
     "", "", "", "", "", "", "")
 
 PILL_W, PILL_H = 320, 64
+PILL_MAX_W = 460                  # ancho máximo de la barra; si el texto no cabe, se recorta con «…»
+PILL_FIJO = 14 + 44 + 12 + 36 + 14 + 14   # margen+icono+hueco + botón+margen + holgura (px lógicos)
 PANEL_W = 380
 SETTINGS_W = 480
 
@@ -139,10 +145,6 @@ S = 1.0  # factor de escala DPI, se calcula al crear la ventana
 
 def px(v: float) -> int:
     return int(round(v * S))
-
-
-def beep(freq: int, ms: int) -> None:
-    threading.Thread(target=winsound.Beep, args=(freq, ms), daemon=True).start()
 
 
 def mix(c1: str, c2: str, t: float) -> str:
@@ -527,7 +529,7 @@ class SettingsWindow:
 
         # --- General
         self.section(body, "General")
-        self.sw_sound = self.switch_row(body, "Sonido al terminar la transcripción", self.cfg["sound"])
+        self.sw_sound = self.switch_row(body, "Sonidos al empezar y al terminar", self.cfg["sound"])
         self.sw_auto = self.switch_row(body, "Iniciar Anuiki con Windows", self.autostart)
         if not getattr(sys, "frozen", False):
             self.sw_auto.unbind("<Button-1>")  # solo en la versión instalada
@@ -692,6 +694,7 @@ class Anuiki:
         self.loading = False
         self.stream = None
         self.chunks: list[np.ndarray] = []
+        self.dictado: DictadoPorSegmentos | None = None
         self.level = 0.0
         self.levels = collections.deque([0.0] * 7, maxlen=7)
         self.rec_start = 0.0
@@ -880,19 +883,22 @@ class Anuiki:
         self.canvas = tk.Canvas(self.bar, width=px(44), height=px(44), bg=BG, highlightthickness=0)
         self.canvas.pack(side="left", padx=(px(14), px(12)))
 
-        texts = tk.Frame(self.bar, bg=BG)
-        texts.pack(side="left", fill="y")
-        self.title = tk.Label(texts, text="", bg=BG, fg=TEXT, font=self.f_title, anchor="w")
-        self.title.pack(anchor="w", pady=(px(11), 0))
-        self.subtitle = tk.Label(texts, text="", bg=BG, fg=TEXT_3, font=self.f_sub, anchor="w")
-        self.subtitle.pack(anchor="w")
-
+        # El botón de expandir se coloca primero a la derecha: reserva su sitio y nunca se corta,
+        # por largo que sea el texto (que es lo que se recorta si hace falta).
         self.hbtn = tk.Canvas(self.bar, width=px(36), height=px(36), bg=BG,
                               highlightthickness=0, cursor="hand2")
         self.hbtn.pack(side="right", padx=(0, px(14)))
         self.hbtn.bind("<Enter>", lambda e: self.draw_hbtn(hover=True))
         self.hbtn.bind("<Leave>", lambda e: self.draw_hbtn(hover=False))
         self.hbtn.bind("<Button-1>", lambda e: self.toggle_history())
+
+        texts = tk.Frame(self.bar, bg=BG)
+        texts.pack(side="left", fill="both", expand=True)
+        texts.pack_propagate(False)
+        self.title = tk.Label(texts, text="", bg=BG, fg=TEXT, font=self.f_title, anchor="w")
+        self.title.pack(anchor="w", pady=(px(11), 0))
+        self.subtitle = tk.Label(texts, text="", bg=BG, fg=TEXT_3, font=self.f_sub, anchor="w")
+        self.subtitle.pack(anchor="w")
 
         for w in (self.bar, self.canvas, texts, self.title, self.subtitle):
             self.bind_drag(w)
@@ -932,6 +938,7 @@ class Anuiki:
         c.create_image(0, 0, image=img, anchor="nw")
 
     def relayout(self) -> None:
+        self.render_state()          # recalcula ancho y recorte de texto para el modo actual (pequeño/expandido)
         for w in self.panel.winfo_children():
             w.destroy()
         self.panel.pack_forget()
@@ -940,7 +947,7 @@ class Anuiki:
             self.build_history()
             width = px(PANEL_W)
         else:
-            width = px(PILL_W)
+            width = getattr(self, "_pill_width", px(PILL_W))
         self.draw_hbtn()
 
         self.root.update_idletasks()
@@ -953,7 +960,8 @@ class Anuiki:
             cx = self.root.winfo_x() + self.root.winfo_width() // 2
             bottom = self.root.winfo_y() + self.root.winfo_height()
             x = cx - width // 2
-        self.root.geometry(f"{width}x{height}+{x}+{bottom - height}")
+        x = max(0, min(x, sw - width))                       # nunca fuera de la pantalla
+        self.root.geometry(f"{width}x{height}+{x}+{max(0, bottom - height)}")
 
     def build_history(self) -> None:
         head = tk.Frame(self.panel, bg=BG)
@@ -1004,6 +1012,34 @@ class Anuiki:
         self.relayout()
 
     # ------------------------------------------------------------ estado y animación
+    def _recortar(self, text: str, font, ancho: int) -> str:
+        """Recorta con «…» para que `text` quepa en `ancho` px con esa fuente."""
+        if font.measure(text) <= ancho:
+            return text
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if font.measure(text[:mid].rstrip() + "…") <= ancho:
+                lo = mid
+            else:
+                hi = mid - 1
+        return text[:lo].rstrip() + "…"
+
+    def _ajustar_ancho(self, title: str, sub: str) -> tuple[str, str]:
+        """Calcula el ancho de la barra pequeña para que el texto y el botón quepan siempre."""
+        medida_titulo = "Escuchando  ·  00:00" if self.state == "grabando" else title
+        texto = max(self.f_title.measure(medida_titulo), self.f_sub.measure(sub)) + px(6)
+        ancho = min(max(px(PILL_W), px(PILL_FIJO) + texto), px(PILL_MAX_W))
+        self._pill_width = ancho
+        disponible = (px(PANEL_W) if self.show_history else ancho) - px(PILL_FIJO)   # ancho real de la barra
+        if not self.show_history and hasattr(self, "_placed") and self.root.winfo_width() != ancho:
+            sw = self.root.winfo_screenwidth()
+            cx = self.root.winfo_x() + self.root.winfo_width() // 2
+            x = max(0, min(cx - ancho // 2, sw - ancho))
+            self.root.geometry(f"{ancho}x{self.root.winfo_height()}+{x}+{self.root.winfo_y()}")
+        return (self._recortar(title, self.f_title, disponible),
+                self._recortar(sub, self.f_sub, disponible))
+
     def render_state(self) -> None:
         dictate = pretty_hotkey(self.cfg["hotkey_dictate"])
         hide = pretty_hotkey(self.cfg["hotkey_hide"]) if self.cfg["hotkey_hide"] else ""
@@ -1017,6 +1053,7 @@ class Anuiki:
             "error": ("Algo falló", "Revisa anuiki.log"),
         }
         title, sub = texts.get(self.state, ("", ""))
+        title, sub = self._ajustar_ancho(title, sub)
         self.title.config(text=title, fg=ERROR if self.state in ("error", "descarga_fallida") else TEXT)
         self.subtitle.config(text=sub)
 
@@ -1219,19 +1256,33 @@ class Anuiki:
         self.hide()
 
     def audio_callback(self, data, frames, t, status) -> None:
-        self.chunks.append(data.copy())
+        dictado = self.dictado
+        if dictado is not None:
+            dictado.feed(data[:, 0])
+        else:
+            self.chunks.append(data.copy())
         self.level = float(np.sqrt(np.mean(data ** 2)))
 
     def start_recording(self) -> None:
         self.target_hwnd = user32.GetForegroundWindow()
         self.chunks = []
         self.level = 0.0
+        self.dictado = None
+        if self.cfg.get("sound", True):
+            sonidos.reproducir("inicio", bloqueante=True)   # antes de abrir el micrófono: no se graba el tono
+        if self.cfg.get("segmentos", True):
+            self.dictado = DictadoPorSegmentos(self.model, self.on_segmentos_listo, self.on_segmentos_error,
+                                               sample_rate=SAMPLE_RATE,
+                                               dir_depuracion=DATA_DIR / "debug" if self.cfg.get("depurar_audio") else None)
         try:
             self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                                          blocksize=800, callback=self.audio_callback)
             self.stream.start()
         except Exception:
             log.exception("No se pudo abrir el micrófono")
+            if self.dictado is not None:
+                self.dictado.cancel()
+                self.dictado = None
             self.set_state("error")
             return
         self.rec_start = time.perf_counter()
@@ -1243,8 +1294,20 @@ class Anuiki:
             self.stream.close()
         finally:
             self.stream = None
+        dictado, self.dictado = self.dictado, None
         if cancel:
+            if dictado is not None:
+                dictado.cancel()
             self.set_state("listo")
+            return
+        if dictado is not None:
+            duration = time.perf_counter() - self.rec_start
+            if duration < MIN_SECONDS:
+                dictado.cancel()
+                self.set_state("listo")
+                return
+            self.set_state("transcribiendo")
+            dictado.finish()   # solo queda el último segmento; el resultado llega por on_segmentos_listo
             return
         audio = np.concatenate(self.chunks)[:, 0] if self.chunks else np.zeros(0, np.float32)
         duration = len(audio) / SAMPLE_RATE
@@ -1266,6 +1329,15 @@ class Anuiki:
             log.exception("Error transcribiendo")
             self.events.put(("state", "error"))
 
+    def on_segmentos_listo(self, text: str, duration: float, elapsed: float) -> None:
+        """Se llama desde el hilo de trabajo: elapsed = espera desde que se dejó de grabar."""
+        log.info("modelo=%s segmentos audio=%.1fs espera_tras_parar=%.2fs texto=%r",
+                 self.model_key, duration, elapsed, text)
+        self.events.put(("result", text, duration, elapsed))
+
+    def on_segmentos_error(self, exc: Exception) -> None:
+        self.events.put(("state", "error"))
+
     def on_result(self, text: str, duration: float, elapsed: float) -> None:
         if text:
             info = f"{time.strftime('%H:%M')} · {duration:.1f} s".replace(".", ",")
@@ -1273,7 +1345,7 @@ class Anuiki:
             self.history = self.history[-30:]
             self.insert_text(text, self.target_hwnd)
             if self.cfg.get("sound", True):
-                beep(988, 90)  # único sonido: la transcripción terminó
+                sonidos.reproducir("fin")   # la transcripción terminó
         self.set_state("listo")
         if self.show_history:
             self.relayout()
