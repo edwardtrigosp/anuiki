@@ -1,0 +1,3 @@
+# Dependencias para compilar el ejecutable
+-r requirements.txt
+pyinstaller==6.22.3

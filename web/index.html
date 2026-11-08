@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anuiki — Dictado por voz local para Windows</title>
+  <meta name="description" content="Dicta en español y escribe tus prompts para asistentes de código con la voz. Pulsa Ctrl+T y habla. Gratis para Windows, 100% local y privado." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Navegación -->
+  <header class="nav">
+    <div class="container nav__inner">
+      <a href="#" class="logo">
+        <span class="logo__mark">a</span>
+        <span class="logo__text">anuiki</span>
+      </a>
+      <nav class="nav__links">
+        <a href="#features">Beneficios</a>
+        <a href="#download">Descargar</a>
+        <a href="#faq">Preguntas</a>
+      </nav>
+      <a href="#download" class="btn btn--light btn--sm">Descargar</a>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container hero__inner">
+      <div class="hero__copy reveal">
+        <span class="pill">Nueva versión <strong id="version-pill">v1.1.0</strong></span>
+        <h1>Dicta en español, <span class="underline">programa</span> con tu voz.</h1>
+        <p class="lead">Pulsa Ctrl+T, habla y tu voz se transcribe a español en el campo activo: ideal para escribir prompts largos para asistentes de código como Claude Code. Todo en tu equipo, sin enviar audio a ningún servidor.</p>
+        <div class="hero__cta">
+          <a id="primary-download" href="#download" class="btn btn--light btn--lg">
+            <span id="primary-icon" class="btn__icon"></span>
+            <span id="primary-label">Descargar gratis</span>
+          </a>
+          <a href="#features" class="btn btn--ghost btn--lg">Conocer más</a>
+        </div>
+        <p class="hero__meta" id="detected-os">Gratis · Para Windows 10 / 11 · 64 bits</p>
+      </div>
+
+      <div class="hero__visual reveal">
+        <div class="laptop" aria-hidden="true">
+          <div class="laptop__screen">
+            <div class="term">
+              <div class="term__bar"><i></i><i></i><i></i><span>Terminal — mi-proyecto</span></div>
+              <div class="term__body">
+                <p class="dim">~/mi-proyecto $ asistente</p>
+                <p class="dim">Listo. Escribe tu prompt:</p>
+                <p><b>&gt;</b> Crea un componente de login con validación de correo y contraseña<span class="caret"></span></p>
+              </div>
+              <div class="pillbar">
+                <span class="pillbar__mic">🎙️</span>
+                <span class="pillbar__wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="pillbar__txt">Escuchando… <small>Ctrl+T</small></span>
+              </div>
+            </div>
+          </div>
+          <div class="laptop__base"></div>
+        </div>
+        <div class="float-card float-card--1">🔒 Audio 100% local</div>
+        <div class="float-card float-card--2">⌨️ Ctrl+T y listo</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="section">
+    <div class="container">
+      <h2 class="section__title reveal">Dictar nunca fue<br />tan fácil.</h2>
+      <div class="features">
+        <article class="feature reveal">
+          <div class="feature__icon">🔒</div>
+          <h3>Privado por diseño</h3>
+          <p>El modelo corre en tu PC. Tu voz nunca sale de tu equipo ni se envía a servidores.</p>
+        </article>
+        <article class="feature reveal">
+          <div class="feature__icon">⚡</div>
+          <h3>Rápido y preciso</h3>
+          <p>Usa NVIDIA Parakeet TDT 0.6B v3, un modelo de voz moderno y muy veloz.</p>
+        </article>
+        <article class="feature reveal">
+          <div class="feature__icon">🇪🇸</div>
+          <h3>Transcribe a español</h3>
+          <p>Habla con naturalidad y obtén el texto en español, con el idioma detectado automáticamente.</p>
+        </article>
+        <article class="feature reveal">
+          <div class="feature__icon">🤖</div>
+          <h3>Ideal para programar con IA</h3>
+          <p>Dicta tus prompts sin quitar las manos del flujo. Ctrl+T dicta, Esc oculta la barra y el historial guarda lo dictado.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- Download -->
+  <section id="download" class="section section--purple">
+    <div class="container">
+      <h2 class="section__title section__title--light reveal">Descarga Anuiki</h2>
+      <p class="section__sub reveal">Instalador oficial para Windows. Gratis y sin registro.</p>
+
+      <div class="downloads" id="downloads"><!-- generado por JS --></div>
+
+      <ol class="steps reveal">
+        <li><span>1</span><div><strong>Instala</strong><p>Descarga y abre el instalador.</p></div></li>
+        <li><span>2</span><div><strong>Descarga el modelo</strong><p>La primera vez baja unos 650 MB (una sola vez).</p></div></li>
+        <li><span>3</span><div><strong>Dicta</strong><p>Pulsa Ctrl+T, habla y listo.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="section">
+    <div class="container container--narrow">
+      <h2 class="section__title reveal">Preguntas frecuentes</h2>
+      <div class="faq">
+        <details class="reveal">
+          <summary>¿Anuiki es gratis?</summary>
+          <p>Sí. Puedes descargar e instalar Anuiki sin ningún costo.</p>
+        </details>
+        <details class="reveal">
+          <summary>¿Se envía mi voz a internet?</summary>
+          <p>No. El reconocimiento se hace en tu equipo. Solo se usa internet la primera vez para descargar el modelo de voz (unos 650 MB).</p>
+        </details>
+        <details class="reveal">
+          <summary>¿Qué requisitos necesito?</summary>
+          <p>Windows 10 u 11 de 64 bits, un micrófono y unos 700 MB libres para el modelo. Por ahora no hay versión para macOS, Linux ni Android.</p>
+        </details>
+        <details class="reveal">
+          <summary>Windows me muestra una advertencia al instalar, ¿es normal?</summary>
+          <p>Puede aparecer el aviso de SmartScreen en las primeras versiones. Haz clic en «Más información» y luego en «Ejecutar de todas formas».</p>
+        </details>
+        <details class="reveal">
+          <summary>¿Cómo actualizo a una nueva versión?</summary>
+          <p>Descarga la última versión desde esta página e instálala encima de la anterior.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA final -->
+  <section class="container">
+    <div class="cta reveal">
+      <h2>¿Listo para empezar?</h2>
+      <p>Deja de teclear tus prompts: dicta en español, gratis y en privado.</p>
+      <a href="#download" class="btn btn--light btn--lg">Descargar Anuiki</a>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <a href="#" class="logo logo--dark">
+        <span class="logo__mark">a</span>
+        <span class="logo__text">anuiki</span>
+      </a>
+      <p>© <span id="year"></span> Anuiki. Todos los derechos reservados.<br />
+        Anuiki es un proyecto independiente, sin afiliación ni respaldo de Anthropic. Claude y Claude Code son marcas de Anthropic, PBC.<br />
+        Modelo de voz: <a href="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3" target="_blank" rel="noopener">NVIDIA Parakeet TDT 0.6B v3</a> (CC BY 4.0), conversión ONNX de <a href="https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx" target="_blank" rel="noopener">istupakov</a>.</p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

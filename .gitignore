@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+
+# Salidas de compilación (se regeneran con scripts/build.ps1)
+build/
+dist/
+
+# Instaladores: demasiado pesados para git, se publican aparte
+web/downloads/*
+!web/downloads/LEEME.txt
+
+# Sistema / editores
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

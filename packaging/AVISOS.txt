@@ -1,0 +1,37 @@
+Anuiki 1.1.0 — Dictado por voz local para Windows
+==================================================
+
+Uso (atajos por defecto; se cambian en Configuración)
+---
+  Ctrl+T          Aparece la barra y empieza a escuchar.
+  Ctrl+T (otra)   Deja de escuchar, transcribe y escribe el texto en el campo activo.
+  Esc             Oculta la barra (si estaba escuchando, cancela).
+  Flecha (^)      Historial: clic en un elemento para escribirlo en el campo activo.
+  Bandeja         Icono junto al reloj: Historial, Configuración y Salir.
+
+Configuración: atajos de teclado, sonido al terminar e inicio con Windows.
+Lo que tengas copiado (texto, imágenes o archivos) se conserva al dictar.
+
+La primera vez que se abre, Anuiki descarga el modelo de voz (~670 MB) en
+%LOCALAPPDATA%\Anuiki\models. Después funciona sin internet: el audio se
+procesa en tu equipo y no se envía a ningún servidor.
+
+Anclar a la barra de tareas
+---------------------------
+Windows no permite que los instaladores anclen programas. Para hacerlo:
+Inicio > busca "Anuiki" > clic derecho > "Anclar a la barra de tareas".
+
+Avisos de terceros
+------------------
+Modelo de voz: NVIDIA Parakeet TDT 0.6B v3
+  (c) NVIDIA Corporation — Licencia Creative Commons Attribution 4.0 (CC BY 4.0)
+  https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+  https://creativecommons.org/licenses/by/4.0/
+Conversión ONNX del modelo: istupakov/parakeet-tdt-0.6b-v3-onnx (CC BY 4.0)
+  https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx
+
+Componentes de software:
+  onnx-asr (MIT), ONNX Runtime (MIT), NumPy (BSD), sounddevice (MIT),
+  PortAudio (MIT), keyboard (MIT), pystray (LGPLv3), Pillow (MIT-CMU),
+  Python (PSF License).
+

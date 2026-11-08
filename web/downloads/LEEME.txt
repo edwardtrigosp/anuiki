@@ -1,0 +1,2 @@
+scripts/build.ps1 copia aquí el instalador (Anuiki-Setup-<versión>.exe).
+Los .exe no se guardan en git; súbelos junto con la web al publicarla.
