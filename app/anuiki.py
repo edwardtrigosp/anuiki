@@ -39,7 +39,7 @@ from segmentador import DictadoPorSegmentos
 
 # ---------------------------------------------------------------- Ajustes
 APP_NAME = "Anuiki"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 DATA_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / APP_NAME
 CONFIG_FILE = DATA_DIR / "config.json"
 SAMPLE_RATE = 16000
@@ -71,6 +71,8 @@ DEFAULT_CONFIG = {
     "hotkey_hide": "esc",
     "hotkey_history": "",
     "sound": True,
+    "espacio_para_detener": True,   # mientras se graba, Espacio detiene la grabación (sin volver a pulsar el atajo)
+    "enter_en_terminal": True,   # en una terminal (Claude Code, OpenCode…) pulsa Enter tras pegar el dictado
     "segmentos": True,   # transcribe por trozos mientras se habla (menos espera al terminar)
     "depurar_audio": False,   # True: guarda los trozos en %LOCALAPPDATA%\Anuiki\debug (solo para diagnóstico)
 }
@@ -139,6 +141,43 @@ user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctyp
 SW_HIDE, SW_SHOWNOACTIVATE = 0, 4
 HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0010, 0x0040
+
+TERMINAL_EXES = {
+    "windowsterminal.exe", "wt.exe", "openconsole.exe", "conhost.exe", "cmd.exe",
+    "powershell.exe", "pwsh.exe", "wezterm-gui.exe", "alacritty.exe", "mintty.exe",
+    "kitty.exe", "conemu64.exe", "conemu.exe", "tabby.exe", "hyper.exe", "warp.exe",
+}
+
+
+def window_exe_name(hwnd) -> str:
+    """Nombre del .exe dueño de la ventana (minúsculas), o '' si no se puede obtener."""
+    try:
+        if not hwnd:
+            return ""
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = wintypes.HANDLE
+        h = k32.OpenProcess(0x1000, False, pid.value)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(520)
+            size = wintypes.DWORD(520)
+            if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                return ""
+            return os.path.basename(buf.value).lower()
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        log.exception("No se pudo obtener el programa de la ventana")
+        return ""
+
+
+def is_terminal_window(hwnd) -> bool:
+    """True si la ventana pertenece a una terminal (Windows Terminal, cmd, PowerShell, etc.)."""
+    return window_exe_name(hwnd) in TERMINAL_EXES
+
 
 S = 1.0  # factor de escala DPI, se calcula al crear la ventana
 
@@ -530,6 +569,10 @@ class SettingsWindow:
         # --- General
         self.section(body, "General")
         self.sw_sound = self.switch_row(body, "Sonidos al empezar y al terminar", self.cfg["sound"])
+        self.sw_space = self.switch_row(body, "Detener la grabación con Espacio",
+                                        self.cfg.get("espacio_para_detener", True))
+        self.sw_enter = self.switch_row(body, "Enviar con Enter al dictar en una terminal",
+                                        self.cfg.get("enter_en_terminal", True))
         self.sw_auto = self.switch_row(body, "Iniciar Anuiki con Windows", self.autostart)
         if not getattr(sys, "frozen", False):
             self.sw_auto.unbind("<Button-1>")  # solo en la versión instalada
@@ -660,6 +703,8 @@ class SettingsWindow:
         if self.capturing:
             return
         self.cfg["sound"] = self.sw_sound.value
+        self.cfg["enter_en_terminal"] = self.sw_enter.value
+        self.cfg["espacio_para_detener"] = self.sw_space.value
         if getattr(sys, "frozen", False) and self.sw_auto.value != self.autostart:
             try:
                 set_autostart(self.sw_auto.value)
@@ -711,6 +756,7 @@ class Anuiki:
         self.tray = None
         self.settings: SettingsWindow | None = None
         self.hotkey_handles = []
+        self.space_handle = None
         self.demo = os.environ.get("DICTADO_DEMO")
 
         self.root = tk.Tk()
@@ -791,6 +837,31 @@ class Anuiki:
                     keyboard.add_hotkey(hk, lambda ev=ev: self.events.put((ev,)), suppress=suppress))
             except Exception:
                 log.exception("Atajo no válido: %s", hk)
+
+    def update_space_stop(self) -> None:
+        """Mientras se graba, Espacio detiene la grabación (y no se escribe en la otra ventana).
+
+        El atajo solo existe durante la grabación: el resto del tiempo el espacio funciona normal.
+        """
+        quiere = self.state == "grabando" and self.cfg.get("espacio_para_detener", True)
+        if quiere and self.space_handle is None:
+            try:
+                self.space_handle = keyboard.add_hotkey(
+                    "space", lambda: self.events.put(("space_stop",)), suppress=True)
+            except Exception:
+                log.exception("No se pudo registrar Espacio para detener")
+        elif not quiere and self.space_handle is not None:
+            try:
+                keyboard.remove_hotkey(self.space_handle)
+            except Exception:
+                pass
+            self.space_handle = None
+
+    def on_space_stop(self) -> None:
+        # Ignora la repetición de tecla y el Espacio que aún siga pulsado del atajo de inicio.
+        if self.state == "grabando" and time.perf_counter() - self.rec_start > 0.6:
+            log.info("Grabación detenida con Espacio")
+            self.stop_recording()
 
     def unregister_hotkeys(self) -> None:
         for h in self.hotkey_handles:
@@ -1059,6 +1130,7 @@ class Anuiki:
 
     def set_state(self, state: str) -> None:
         self.state = state
+        self.update_space_stop()
         self.anim_t0 = time.perf_counter()
         self.render_state()
         if state == "listo" and self.pending_start:
@@ -1166,6 +1238,8 @@ class Anuiki:
                     self.on_toggle()
                 elif kind == "esc":
                     self.on_esc()
+                elif kind == "space_stop":
+                    self.on_space_stop()
                 elif kind == "state":
                     self.set_state(ev[1])
                 elif kind == "result":
@@ -1364,6 +1438,11 @@ class Anuiki:
         if hwnd:
             user32.SetForegroundWindow(hwnd)
         self.root.after(60, lambda: keyboard.send("ctrl+v"))
+        enviar = self.cfg.get("enter_en_terminal", True) and is_terminal_window(hwnd)
+        log.info("Pegado: ventana=%s, terminal=%s, enter=%s", window_exe_name(hwnd),
+                 "sí" if is_terminal_window(hwnd) else "no", "sí" if enviar else "no")
+        if enviar:
+            self.root.after(350, lambda: keyboard.send("enter"))   # envía el texto como si se pulsara Enter
         self.root.after(1200, lambda: clipboard_restore(saved))
 
     def copy_text(self, text: str) -> None:
