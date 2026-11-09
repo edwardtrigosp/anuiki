@@ -67,6 +67,9 @@ jobs:
           } else {
             $exe = "unsigned/Anuiki-Setup.exe"; $nota = "Instalador de Anuiki para Windows 10/11 (64 bits). Aún sin firma de código: SmartScreen puede mostrar un aviso."
           }
-          gh release create "${{ github.ref_name }}" $exe `
+          # El archivo que se descarga lleva la versión en el nombre: Anuiki-Setup-1.3.1.exe
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          Copy-Item $exe "Anuiki-Setup-$v.exe"
+          gh release create "${{ github.ref_name }}" "Anuiki-Setup-$v.exe" `
             --title "Anuiki ${{ github.ref_name }}" `
             --notes $nota
