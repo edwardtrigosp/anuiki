@@ -34,12 +34,13 @@ import keyboard
 import numpy as np
 import sounddevice as sd
 
+import microfono
 import sonidos
 from segmentador import DictadoPorSegmentos
 
 # ---------------------------------------------------------------- Ajustes
 APP_NAME = "Anuiki"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 DATA_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / APP_NAME
 CONFIG_FILE = DATA_DIR / "config.json"
 SAMPLE_RATE = 16000
@@ -71,6 +72,8 @@ DEFAULT_CONFIG = {
     "hotkey_hide": "esc",
     "hotkey_history": "",
     "sound": True,
+    "bienvenida_vista": False,      # False: al abrir la app se muestra la guía de uso (primera vez)
+    "opacidad": 0.95,               # opacidad de la barra (0,3 a 1)
     "espacio_para_detener": True,   # mientras se graba, Espacio detiene la grabación (sin volver a pulsar el atajo)
     "enter_en_terminal": True,   # en una terminal (Claude Code, OpenCode…) pulsa Enter tras pegar el dictado
     "segmentos": True,   # transcribe por trozos mientras se habla (menos espera al terminar)
@@ -103,15 +106,19 @@ PURPLE_HOVER = "#6E08B3"
 LILAC = "#D9B8F5"
 SUCCESS = "#1E9E5A"
 ERROR = "#D93025"
-FONT = "Segoe UI Variable Text"
+FONT = "Segoe UI Variable Text"          # alternativa si no se puede cargar Manrope
 FONT_DISPLAY = "Segoe UI Variable Display"
 ICONS = "Segoe Fluent Icons"
 IC_MIC, IC_UP, IC_DOWN, IC_WARN, IC_RETRY, IC_GEAR, IC_CLOSE = (
     "", "", "", "", "", "", "")
 
-PILL_W, PILL_H = 320, 64
-PILL_MAX_W = 460                  # ancho máximo de la barra; si el texto no cabe, se recorta con «…»
-PILL_FIJO = 14 + 44 + 12 + 36 + 14 + 14   # margen+icono+hueco + botón+margen + holgura (px lógicos)
+PILL_H = 38                       # alto de la barra pequeña (px lógicos): una sola fila
+PILL_PAD = 7                      # margen izquierdo, derecho, superior e inferior: icono, cápsula y botones miden 24
+PILL_PAD_R = 7
+PILL_GAP = 7                      # hueco entre los elementos de la barra
+BAR_MIN_W, BAR_MAX_W = 224, 330   # ancho de la barra pequeña: igual en los estados normales, así no «salta»
+BARRAS = 48                       # historial de niveles de la onda (se dibujan las que caben)
+BORDER_HEX = "#EAE3F0"
 PANEL_W = 380
 SETTINGS_W = 480
 
@@ -129,6 +136,10 @@ WS_EX_TOPMOST = 0x00000008
 DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWA_BORDER_COLOR = 34
 DWMWCP_ROUND = 2
+gdi32 = ctypes.windll.gdi32
+gdi32.CreateRoundRectRgn.restype = wintypes.HANDLE
+gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
+user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetParent.restype = wintypes.HWND
 user32.GetParent.argtypes = [wintypes.HWND]
@@ -203,6 +214,76 @@ def round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
     return c.create_polygon(pts, smooth=True, **kw)
 
 
+# Iconos de la barra. Tk no suaviza los bordes de círculos ni líneas, así que se dibujan con PIL a 4x y se reducen.
+# Cada función recibe el dibujo y `u` (píxeles por unidad lógica); todos usan un lienzo de 24 x 24 unidades.
+def aa_imagen(widget, w, h, dibujar, k: int = 4):
+    """Imagen suavizada para un widget de Tk (w y h en px físicos).
+
+    Se dibuja con PIL a k veces el tamaño y se reduce; `dibujar(d, k)` recibe el dibujo y el factor k."""
+    from PIL import Image, ImageDraw, ImageTk
+
+    w, h = max(1, int(w)), max(1, int(h))
+    grande = Image.new("RGBA", (w * k, h * k), (255, 255, 255, 0))
+    dibujar(ImageDraw.Draw(grande), k)
+    return ImageTk.PhotoImage(grande.resize((w, h), Image.LANCZOS), master=widget)
+
+
+def _dib_circulo(color):
+    return lambda d, u: d.ellipse((0, 0, 24 * u - 1, 24 * u - 1), fill=color)
+
+
+def _dib_mic(d, u) -> None:
+    b, w = "#FFFFFF", max(1, round(1.5 * u))
+    d.ellipse((0, 0, 24 * u - 1, 24 * u - 1), fill=PURPLE)
+    d.rounded_rectangle((9.5 * u, 4.8 * u, 14.5 * u, 14 * u), radius=2.5 * u, fill=b)
+    d.arc((7 * u, 7 * u, 17 * u, 17.5 * u), 0, 180, fill=b, width=w)
+    d.line((12 * u, 17.2 * u, 12 * u, 19.4 * u), fill=b, width=w)
+    d.line((9.6 * u, 19.6 * u, 14.4 * u, 19.6 * u), fill=b, width=w)
+    for x, y in ((12, 19.6), (9.6, 19.6), (14.4, 19.6)):       # puntas redondeadas
+        d.ellipse(((x - 0.75) * u, (y - 0.75) * u, (x + 0.75) * u, (y + 0.75) * u), fill=b)
+
+
+def _dib_aviso(d, u) -> None:
+    d.ellipse((0, 0, 24 * u - 1, 24 * u - 1), fill="#FCE8E6")
+    d.polygon([(12 * u, 5.2 * u), (19.2 * u, 17.8 * u), (4.8 * u, 17.8 * u)], fill=ERROR)
+    d.line((12 * u, 9.8 * u, 12 * u, 13.6 * u), fill="#FFFFFF", width=max(1, round(1.6 * u)))
+    d.ellipse((11.1 * u, 14.6 * u, 12.9 * u, 16.4 * u), fill="#FFFFFF")
+
+
+def _dib_reintentar(d, u) -> None:
+    d.ellipse((0, 0, 24 * u - 1, 24 * u - 1), fill="#FCE8E6")
+    d.arc((6.2 * u, 6.2 * u, 17.8 * u, 17.8 * u), 40, 330, fill=ERROR, width=max(1, round(1.7 * u)))
+    a = math.radians(330)
+    px_, py_ = 12 + 5.8 * math.cos(a), 12 + 5.8 * math.sin(a)
+    tx, ty, nx, ny = -math.sin(a), math.cos(a), math.cos(a), math.sin(a)
+    d.polygon([((px_ + tx * 3) * u, (py_ + ty * 3) * u), ((px_ + nx * 2.4) * u, (py_ + ny * 2.4) * u),
+               ((px_ - nx * 2.4) * u, (py_ - ny * 2.4) * u)], fill=ERROR)
+
+
+def _dib_chevron(arriba: bool):
+    def f(d, u) -> None:
+        dy = -2.4 if arriba else 2.4
+        pts = [(7.5 * u, (12 - dy) * u), (12 * u, (12 + dy) * u), (16.5 * u, (12 - dy) * u)]
+        w = max(1, round(2 * u))
+        d.line(pts, fill=PURPLE, width=w, joint="curve")
+        for x, y in pts:
+            d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=PURPLE)
+    return f
+
+
+def _dib_anillo(color, desde: float, hasta: float):
+    """Anillo de 26 x 26 unidades con un arco de color (ángulos de PIL: en grados, sentido horario desde las 3 en punto)."""
+    def f(d, u) -> None:
+        w = max(1, round(3 * u))
+        caja = (3 * u, 3 * u, 23 * u, 23 * u)
+        d.ellipse(caja, outline=TRACK, width=w)
+        d.arc(caja, desde, hasta, fill=color, width=w)
+        for ang in (desde, hasta):                                   # extremos redondeados
+            x, y = 13 + 10 * math.cos(math.radians(ang)), 13 + 10 * math.sin(math.radians(ang))
+            d.ellipse((x * u - w / 2, y * u - w / 2, x * u + w / 2, y * u + w / 2), fill=color)
+    return f
+
+
 def pretty_hotkey(hk: str) -> str:
     if not hk:
         return "Sin asignar"
@@ -210,6 +291,25 @@ def pretty_hotkey(hk: str) -> str:
              "space": "Espacio", "enter": "Enter", "tab": "Tab"}
     return " + ".join(names.get(p, p.upper() if len(p) == 1 else p.capitalize())
                       for p in hk.split("+"))
+
+
+def recurso(ruta: str) -> Path:
+    """Ruta de un archivo incluido con la app (funciona desde el código y desde el instalador)."""
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / ruta
+
+
+def cargar_fuentes() -> bool:
+    """Registra la tipografía Manrope (SIL OFL) solo para esta app, sin instalarla en Windows."""
+    FR_PRIVATE = 0x10
+    ok = False
+    for nombre in ("Manrope-Regular.ttf", "Manrope-Bold.ttf"):
+        ruta = recurso("assets/fonts/" + nombre)
+        try:
+            if ruta.exists() and ctypes.windll.gdi32.AddFontResourceExW(str(ruta), FR_PRIVATE, 0):
+                ok = True
+        except Exception:
+            log.exception("No se pudo cargar la fuente %s", nombre)
+    return ok
 
 
 def single_instance() -> bool:
@@ -467,6 +567,7 @@ class Switch(tk.Canvas):
         super().__init__(master, width=px(44), height=px(26), bg=bg, highlightthickness=0,
                          cursor="hand2")
         self.value = value
+        self._imgs = {}
         self.bind("<Button-1>", lambda e: self.set(not self.value))
         self.draw()
 
@@ -478,10 +579,49 @@ class Switch(tk.Canvas):
         self.delete("all")
         w, h = px(44), px(26)
         on = self.value
-        round_rect(self, 1, 1, w - 1, h - 1, h / 2, fill=PURPLE if on else TRACK)
-        r = px(9) if on else px(7)
-        cx = w - px(13) if on else px(13)
-        self.create_oval(cx - r, h / 2 - r, cx + r, h / 2 + r, fill="#FFFFFF", outline="")
+        if on not in self._imgs:
+            def dib(d, k) -> None:
+                d.rounded_rectangle((0, 0, w * k - 1, h * k - 1), radius=h * k / 2, fill=PURPLE if on else TRACK)
+                r = px(9) if on else px(7)
+                cx = w - px(13) if on else px(13)
+                d.ellipse(((cx - r) * k, (h / 2 - r) * k, (cx + r) * k, (h / 2 + r) * k), fill="#FFFFFF")
+
+            self._imgs[on] = aa_imagen(self, w, h, dib)
+        self.create_image(0, 0, anchor="nw", image=self._imgs[on])
+
+
+class Slider(tk.Canvas):
+    """Deslizador con el estilo de la app (entero entre `lo` y `hi`)."""
+
+    def __init__(self, master, lo: int, hi: int, value: int, command, width=150):
+        self.w, self.h = px(width), px(26)
+        super().__init__(master, width=self.w, height=self.h, bg=BG, highlightthickness=0, cursor="hand2")
+        self.lo, self.hi, self.value, self.command = lo, hi, value, command
+        self.bind("<Button-1>", self._mover)
+        self.bind("<B1-Motion>", self._mover)
+        self.draw()
+
+    def _mover(self, e) -> None:
+        m = px(10)
+        f = min(1.0, max(0.0, (e.x - m) / (self.w - 2 * m)))
+        self.value = round(self.lo + f * (self.hi - self.lo))
+        self.draw()
+        self.command(self.value)
+
+    def draw(self) -> None:
+        self.delete("all")
+        m, y, w, h = px(10), self.h / 2, self.w, self.h
+        x = m + (self.value - self.lo) / (self.hi - self.lo) * (w - 2 * m)
+
+        def dib(d, k) -> None:
+            d.rounded_rectangle((m * k, (y - px(2)) * k, (w - m) * k, (y + px(2)) * k), radius=px(2) * k, fill=TRACK)
+            d.rounded_rectangle((m * k, (y - px(2)) * k, max(m + px(4), x) * k, (y + px(2)) * k),
+                                radius=px(2) * k, fill=PURPLE)
+            d.ellipse(((x - px(8)) * k, (y - px(8)) * k, (x + px(8)) * k, (y + px(8)) * k), fill=PURPLE)
+            d.ellipse(((x - px(3)) * k, (y - px(3)) * k, (x + px(3)) * k, (y + px(3)) * k), fill="#FFFFFF")
+
+        self._img = aa_imagen(self, w, h, dib)
+        self.create_image(0, 0, anchor="nw", image=self._img)
 
 
 class Button(tk.Canvas):
@@ -499,18 +639,23 @@ class Button(tk.Canvas):
 
     def draw(self, hover: bool) -> None:
         self.delete("all")
-        h = px(38)
+        h, w = px(38), self.w
         if self.primary:
-            round_rect(self, 1, 1, self.w - 1, h - 1, h / 2, fill=PURPLE_HOVER if hover else PURPLE)
-            self.create_text(self.w / 2, h / 2, text=self.text, font=self.font, fill="#FFFFFF")
+            fill, texto = (PURPLE_HOVER if hover else PURPLE), "#FFFFFF"
         else:
-            round_rect(self, 1, 1, self.w - 1, h - 1, h / 2, fill=TONAL if hover else self["bg"])
-            self.create_text(self.w / 2, h / 2, text=self.text, font=self.font, fill=PURPLE)
+            fill, texto = (TONAL if hover else None), PURPLE
+        if fill:
+            def dib(d, k) -> None:
+                d.rounded_rectangle((k, k, (w - 1) * k, (h - 1) * k), radius=h * k / 2, fill=fill)
+
+            self._img = aa_imagen(self, w, h, dib)
+            self.create_image(0, 0, anchor="nw", image=self._img)
+        self.create_text(w / 2, h / 2, text=self.text, font=self.font, fill=texto)
 
 
 # ---------------------------------------------------------------- Ventana de configuración
 class SettingsWindow:
-    def __init__(self, app: "Anuiki"):
+    def __init__(self, app: "Anuiki", tab: str = "ajustes"):
         self.app = app
         self.cfg = dict(app.cfg)
         self.autostart = autostart_enabled()
@@ -529,8 +674,8 @@ class SettingsWindow:
         head = tk.Frame(self.win, bg=BG)
         head.pack(fill="x", padx=pad, pady=(px(20), px(4)))
         logo = tk.Canvas(head, width=px(36), height=px(36), bg=BG, highlightthickness=0)
-        logo.create_oval(0, 0, px(36), px(36), fill=PURPLE, outline="")
-        logo.create_text(px(18), px(18), text=IC_MIC, font=(ICONS, 11), fill="#FFFFFF")
+        self._logo = aa_imagen(logo, px(36), px(36), lambda d, k: _dib_mic(d, px(36) * k / 24))
+        logo.create_image(0, 0, anchor="nw", image=self._logo)
         logo.pack(side="left")
         tt = tk.Frame(head, bg=BG)
         tt.pack(side="left", padx=px(12))
@@ -538,11 +683,21 @@ class SettingsWindow:
         tk.Label(tt, text=f"{APP_NAME} {APP_VERSION}", bg=BG, fg=TEXT_3, font=f["meta"]).pack(anchor="w")
         close = tk.Canvas(head, width=px(32), height=px(32), bg=BG, highlightthickness=0, cursor="hand2")
         close.pack(side="right")
+        tabs = tk.Frame(head, bg=BG)
+        tabs.pack(side="right", padx=(0, px(6)))
+        self.tab_btns = {}
+        for clave, texto in (("uso", "Guía"), ("ajustes", "Ajustes")):
+            b = Button(tabs, texto, lambda k=clave: self.tab(k), primary=(clave == tab), width=74)
+            b.pack(side="left", padx=px(1))
+            self.tab_btns[clave] = b
+
+        self._close_hover = aa_imagen(close, px(32), px(32),
+                                      lambda d, k: d.ellipse((0, 0, px(32) * k - 1, px(32) * k - 1), fill=TONAL))
 
         def draw_close(hover=False):
             close.delete("all")
             if hover:
-                close.create_oval(0, 0, px(32), px(32), fill=TONAL, outline="")
+                close.create_image(0, 0, anchor="nw", image=self._close_hover)
             close.create_text(px(16), px(16), text=IC_CLOSE, font=(ICONS, 9), fill=TEXT_2)
 
         draw_close()
@@ -553,8 +708,8 @@ class SettingsWindow:
             w.bind("<ButtonPress-1>", self._drag_start)
             w.bind("<B1-Motion>", self._drag_move)
 
-        body = tk.Frame(self.win, bg=BG)
-        body.pack(fill="both", expand=True, padx=pad)
+        self.pane_uso = tk.Frame(self.win, bg=BG)
+        body = self.body = tk.Frame(self.win, bg=BG)
 
         # --- Modelo
         self.section(body, "Modelo de voz")
@@ -572,6 +727,7 @@ class SettingsWindow:
 
         # --- General
         self.section(body, "General")
+        self.opacidad_row(body)
         self.sw_sound = self.switch_row(body, "Sonidos al empezar y al terminar", self.cfg["sound"])
         self.sw_space = self.switch_row(body, "Detener la grabación con Espacio",
                                         self.cfg.get("espacio_para_detener", True))
@@ -582,18 +738,91 @@ class SettingsWindow:
             self.sw_auto.unbind("<Button-1>")  # solo en la versión instalada
 
         # --- Pie
-        self.msg = tk.Label(self.win, text="", bg=BG, fg=ERROR, font=f["meta"], anchor="w")
-        self.msg.pack(fill="x", padx=pad, pady=(px(10), 0))
-        foot = tk.Frame(self.win, bg=BG)
-        foot.pack(fill="x", padx=pad, pady=(px(6), px(20)))
+        self.pie = tk.Frame(self.win, bg=BG)
+        self.msg = tk.Label(self.pie, text="", bg=BG, fg=ERROR, font=f["meta"], anchor="w")
+        self.msg.pack(fill="x", padx=pad, pady=(px(8), 0))
+        foot = tk.Frame(self.pie, bg=BG)
+        foot.pack(fill="x", padx=pad, pady=(px(6), px(16)))
         Button(foot, "Guardar", self.save).pack(side="right")
         Button(foot, "Cancelar", self.close, primary=False, width=90).pack(side="right", padx=px(8))
 
+        self.tab(tab, centrar=True)
+        self.win.after(50, self._style)
+
+    # -- pestañas
+    def tab(self, clave: str, centrar: bool = False) -> None:
+        pad = px(24)
+        for k, b in self.tab_btns.items():
+            b.primary = (k == clave)
+            b.draw(False)
+        self.pane_uso.pack_forget()
+        self.body.pack_forget()
+        self.pie.pack_forget()
+        if clave == "uso":
+            self._rellenar_uso()
+            self.pane_uso.pack(fill="both", expand=True, padx=pad)
+        else:
+            self.body.pack(fill="both", expand=True, padx=pad)
+            self.pie.pack(fill="x")
         self.win.update_idletasks()
         w, h = px(SETTINGS_W), self.win.winfo_reqheight()
         sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        self.win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
-        self.win.after(50, self._style)
+        if centrar:
+            x, y = (sw - w) // 2, (sh - h) // 2
+        else:
+            x, y = self.win.winfo_x(), self.win.winfo_y()
+        x, y = max(0, min(x, sw - w)), max(0, min(y, sh - h - px(48)))
+        self.win.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _rellenar_uso(self) -> None:
+        """Mini guía: para qué sirve cada atajo (con los atajos que tengas configurados ahora)."""
+        for w in self.pane_uso.winfo_children():
+            w.destroy()
+        f, p = self.app.fonts, self.pane_uso
+        ancho = px(SETTINGS_W - 48)
+        tk.Label(p, text="Dicta en tres pasos", bg=BG, fg=TEXT, font=f["h1"], anchor="w").pack(fill="x", pady=(px(16), px(2)))
+        tk.Label(p, text="Anuiki te escucha y escribe lo que dices en el campo donde tengas el cursor.",
+                 bg=BG, fg=TEXT_2, font=f["sub"], anchor="w", justify="left", wraplength=ancho).pack(fill="x", pady=(0, px(12)))
+        dictar = pretty_hotkey(self.cfg["hotkey_dictate"])
+        enviar = "Espacio" if self.cfg.get("espacio_para_detener", True) else dictar
+        cancelar = pretty_hotkey(self.cfg["hotkey_hide"]) if self.cfg["hotkey_hide"] else "Sin asignar"
+        self._paso(p, 1, dictar, "Empezar", "Aparece la barra y empieza a escuchar. Habla con naturalidad.")
+        self._paso(p, 2, enviar, "Enviar", "Termina la grabación y escribe el texto en el campo donde estabas.")
+        self._paso(p, 3, cancelar, "Cancelar o salir", "Descarta la grabación y oculta la barra.")
+        notas = ("• En una terminal (Claude Code, OpenCode…) el texto se envía solo con Enter.\n"
+                 "• Si la barra dice «Micrófono apagado», actívalo en Windows.\n"
+                 "• Cambia los atajos en la pestaña Ajustes. Esta guía se abre siempre desde el icono de engranaje de la barra.")
+        tk.Label(p, text=notas, bg=BG, fg=TEXT_3, font=f["meta"], anchor="w", justify="left",
+                 wraplength=ancho).pack(fill="x", pady=(px(6), 0))
+        foot = tk.Frame(p, bg=BG)
+        foot.pack(fill="x", pady=(px(14), px(16)))
+        Button(foot, "Entendido", self.close).pack(side="right")
+
+    def _paso(self, master, n: int, tecla: str, titulo: str, texto: str) -> None:
+        f = self.app.fonts
+        w, pad = px(SETTINGS_W - 48), px(14)
+        c = tk.Canvas(master, width=w, bg=BG, highlightthickness=0)
+        chip_w = f["mono"].measure(tecla) + px(24)
+        x_txt = pad + px(28) + px(12)
+        cy = pad + px(14)
+        circ = aa_imagen(c, px(28), px(28), lambda dd, k: dd.ellipse((0, 0, px(28) * k - 1, px(28) * k - 1), fill=PURPLE))
+        chip = aa_imagen(c, chip_w, px(26), lambda dd, k: dd.rounded_rectangle(
+            (0, 0, chip_w * k - 1, px(26) * k - 1), radius=px(13) * k, fill="#FFFFFF"))
+        c.imgs = [circ, chip]          # referencias: Tk no conserva las imágenes si Python las libera
+        c.create_image(pad, cy - px(14), anchor="nw", image=circ)
+        c.create_text(pad + px(14), cy, text=str(n), font=f["mono"], fill="#FFFFFF")
+        c.create_text(x_txt, cy, text=titulo, anchor="w", font=f["title"], fill=TEXT)
+        c.create_image(w - pad - chip_w, cy - px(13), anchor="nw", image=chip)
+        c.create_text(w - pad - chip_w / 2, cy, text=tecla, font=f["mono"], fill=PURPLE)
+        d = c.create_text(x_txt, cy + px(22), text=texto, anchor="nw", font=f["sub"], fill=TEXT_2, width=w - x_txt - pad)
+        h = c.bbox(d)[3] + pad
+        fondo = aa_imagen(c, w, h, lambda dd, k: dd.rounded_rectangle(
+            (0, 0, w * k - 1, h * k - 1), radius=px(16) * k, fill=TONAL))
+        c.imgs.append(fondo)
+        bg_id = c.create_image(0, 0, anchor="nw", image=fondo)
+        c.tag_lower(bg_id)
+        c.config(height=h)
+        c.pack(fill="x", pady=(0, px(8)))
 
     # -- utilidades de ventana
     def _style(self) -> None:
@@ -612,7 +841,7 @@ class SettingsWindow:
 
     def section(self, master, title: str) -> None:
         tk.Label(master, text=title.upper(), bg=BG, fg=PURPLE, font=self.app.fonts["section"],
-                 anchor="w").pack(fill="x", pady=(px(18), px(8)))
+                 anchor="w").pack(fill="x", pady=(px(14), px(6)))
 
     # -- modelo
     def model_card(self, master, key: str) -> None:
@@ -622,17 +851,26 @@ class SettingsWindow:
         w, h = px(SETTINGS_W - 48), px(72)
         c = tk.Canvas(master, width=w, height=h, bg=BG, highlightthickness=0)
         c.pack(fill="x")
-        round_rect(c, 0, 0, w, h, px(16), fill=PURPLE)
-        round_rect(c, px(2), px(2), w - px(2), h - px(2), px(14), fill=TONAL)
-        c.create_oval(px(14), px(18), px(50), px(54), fill=PURPLE, outline="")
-        c.create_text(px(32), px(36), text=IC_MIC, font=(ICONS, 11), fill="#FFFFFF")
+        def tarjeta(d, k) -> None:
+            d.rounded_rectangle((0, 0, w * k - 1, h * k - 1), radius=px(16) * k, fill=PURPLE)
+            d.rounded_rectangle((px(2) * k, px(2) * k, (w - px(2)) * k - 1, (h - px(2)) * k - 1),
+                                radius=px(14) * k, fill=TONAL)
+
+        fondo = aa_imagen(c, w, h, tarjeta)
+        icono = aa_imagen(c, px(36), px(36), lambda d, k: _dib_mic(d, px(36) * k / 24))
+        c.imgs = [fondo, icono]        # referencias: Tk no conserva las imágenes si Python las libera
+        c.create_image(0, 0, anchor="nw", image=fondo)
+        c.create_image(px(14), px(18), anchor="nw", image=icono)
         c.create_text(px(64), px(24), text=spec["name"], anchor="w", font=f["title"], fill=TEXT)
         c.create_text(px(64), px(46), text=spec["desc"], anchor="w", font=f["sub"], fill=TEXT_2)
         ready = model_ready(key)
         badge = "Instalado" if ready else f"Pendiente · {model_size_mb(key)} MB"
         bw = f["meta"].measure(badge) + px(18)
         x2 = w - px(14)
-        round_rect(c, x2 - bw, px(14), x2, px(36), px(11), fill="#E3F4EA" if ready else TONAL_HOVER)
+        pastilla = aa_imagen(c, bw, px(22), lambda d, k: d.rounded_rectangle(
+            (0, 0, bw * k - 1, px(22) * k - 1), radius=px(11) * k, fill="#E3F4EA" if ready else TONAL_HOVER))
+        c.imgs.append(pastilla)
+        c.create_image(x2 - bw, px(14), anchor="nw", image=pastilla)
         c.create_text(x2 - bw / 2, px(25), text=badge, font=f["meta"], fill=SUCCESS if ready else PURPLE)
 
     # -- atajos
@@ -702,6 +940,23 @@ class SettingsWindow:
         sw.pack(side="right")
         return sw
 
+    def opacidad_row(self, master) -> None:
+        row = tk.Frame(master, bg=BG)
+        row.pack(fill="x", pady=px(5))
+        tk.Label(row, text="Opacidad de la barra", bg=BG, fg=TEXT, font=self.app.fonts["item"]).pack(side="left")
+        pct = round(float(self.cfg.get("opacidad", 0.95)) * 100)
+        self.lbl_op = tk.Label(row, text=f"{pct} %", bg=BG, fg=TEXT_2, font=self.app.fonts["sub"], width=5, anchor="e")
+        self.lbl_op.pack(side="right")
+        self.sl_op = Slider(row, 30, 100, max(30, min(100, pct)), self._on_opacidad)
+        self.sl_op.pack(side="right")
+        self._barra_estaba_visible = self.app.visible
+
+    def _on_opacidad(self, v: int) -> None:
+        """Vista previa en vivo: la barra se muestra con la opacidad elegida."""
+        self.lbl_op.config(text=f"{v} %")
+        self.app.show()
+        self.app.aplicar_opacidad(v / 100)
+
     # -- guardar / cerrar
     def save(self) -> None:
         if self.capturing:
@@ -709,6 +964,7 @@ class SettingsWindow:
         self.cfg["sound"] = self.sw_sound.value
         self.cfg["enter_en_terminal"] = self.sw_enter.value
         self.cfg["espacio_para_detener"] = self.sw_space.value
+        self.cfg["opacidad"] = self.sl_op.value / 100
         if getattr(sys, "frozen", False) and self.sw_auto.value != self.autostart:
             try:
                 set_autostart(self.sw_auto.value)
@@ -721,6 +977,9 @@ class SettingsWindow:
         if self.capturing:
             return
         if self.win.winfo_exists():
+            self.app.aplicar_opacidad()   # descarta la vista previa si no se guardó
+            if not self._barra_estaba_visible and self.app.state in ("listo", "error"):
+                self.app.hide()
             self.win.destroy()   # <Destroy> limpia app.settings
 
     def _on_destroy(self, e) -> None:
@@ -745,7 +1004,7 @@ class Anuiki:
         self.chunks: list[np.ndarray] = []
         self.dictado: DictadoPorSegmentos | None = None
         self.level = 0.0
-        self.levels = collections.deque([0.0] * 7, maxlen=7)
+        self.levels = collections.deque([0.0] * BARRAS, maxlen=BARRAS)
         self.rec_start = 0.0
         self.target_hwnd = None
         self.history: list[tuple[str, str]] = []   # (texto, info)
@@ -763,15 +1022,20 @@ class Anuiki:
         self.space_handle = None
         self.peak = 0.0            # pico de audio de la grabación en curso (0 = el micrófono no envía señal)
         self.mic_silencio = False
+        self.mic_estuvo_apagado = False   # el micrófono estuvo apagado en algún momento de la grabación en curso
+        self.mic_estado = "ok"     # estado del micrófono de Windows: "ok", "apagado" o "ausente" (se vigila siempre)
         self.demo = os.environ.get("DICTADO_DEMO")
 
+        cargar_fuentes()   # antes de crear la ventana: Tk lee las fuentes disponibles al usarlas
         self.root = tk.Tk()
         if not self.demo:
             self.root.attributes("-alpha", 0.0)  # invisible hasta ocultarla con Win32
         global S, FONT, FONT_DISPLAY, ICONS
         S = self.root.winfo_fpixels("1i") / 96.0
         families = set(tkfont.families())
-        if FONT not in families:          # Windows 10
+        if "Manrope" in families:         # tipografía libre incluida con la app
+            FONT = FONT_DISPLAY = "Manrope"
+        elif FONT not in families:        # Windows 10
             FONT = FONT_DISPLAY = "Segoe UI"
         if ICONS not in families:
             ICONS = "Segoe MDL2 Assets"
@@ -787,6 +1051,7 @@ class Anuiki:
             "item": tkfont.Font(family=FONT, size=10),
             "meta": tkfont.Font(family=FONT, size=8),
             "mono": tkfont.Font(family=FONT, size=9, weight="bold"),
+            "tiempo": tkfont.Font(family=FONT_DISPLAY, size=10, weight="bold"),
         }
         self.f_title, self.f_sub = self.fonts["title"], self.fonts["sub"]
         self.f_item, self.f_meta = self.fonts["item"], self.fonts["meta"]
@@ -794,6 +1059,7 @@ class Anuiki:
         self.menu = tk.Menu(self.root, tearoff=0, bg=BG, fg=TEXT, activebackground=PURPLE,
                             activeforeground="#FFFFFF", bd=0, font=(FONT, 10), relief="flat")
         self.menu.add_command(label="Historial", command=self.toggle_history)
+        self.menu.add_command(label="Cómo usar Anuiki", command=lambda: self.open_settings("uso"))
         self.menu.add_command(label="Configuración", command=self.open_settings)
         self.menu.add_separator()
         self.menu.add_command(label="Salir", command=self.quit)
@@ -802,6 +1068,10 @@ class Anuiki:
         self.root.after(80, self.apply_window_style)
         self.root.after(30, self.poll_events)
         self.root.after(33, self.animate)
+        self.vigilante_mic = None
+        if not self.demo:
+            self.vigilante_mic = microfono.VigilanteMicrofono(lambda estado: self.events.put(("mic", estado)))
+            self.vigilante_mic.iniciar()
 
         if self.demo:  # solo para capturas de diseño
             self.history = [
@@ -828,6 +1098,8 @@ class Anuiki:
         self.start_model_load()
         self.start_tray()
         self.register_hotkeys()
+        if not self.cfg.get("bienvenida_vista"):
+            self.root.after(900, self.mostrar_bienvenida)
 
     # ------------------------------------------------------------ atajos
     def register_hotkeys(self) -> None:
@@ -878,12 +1150,19 @@ class Anuiki:
         self.hotkey_handles = []
 
     # ------------------------------------------------------------ configuración
-    def open_settings(self) -> None:
+    def open_settings(self, tab: str = "ajustes") -> None:
         if self.settings_open():
+            self.settings.tab(tab)
             self.settings.win.lift()
             self.settings.win.focus_force()
             return
-        self.settings = SettingsWindow(self)
+        self.settings = SettingsWindow(self, tab)
+
+    def mostrar_bienvenida(self) -> None:
+        """Primera vez que se abre Anuiki: muestra la guía de uso."""
+        self.cfg["bienvenida_vista"] = True
+        save_config(self.cfg)
+        self.open_settings("uso")
 
     def settings_open(self) -> bool:
         try:
@@ -898,9 +1177,28 @@ class Anuiki:
         save_config(self.cfg)
         log.info("Configuración guardada: %s", self.cfg)
         self.register_hotkeys()
+        self.aplicar_opacidad()
         self.render_state()
 
     # ------------------------------------------------------------ ventana
+    def aplicar_opacidad(self, valor: float | None = None) -> None:
+        v = self.cfg.get("opacidad", 0.95) if valor is None else valor
+        self.root.attributes("-alpha", max(0.3, min(1.0, float(v))))
+
+    def _aplicar_forma(self, ancho: int, alto: int) -> None:
+        """Esquinas redondeadas iguales en toda la ventana.
+
+        Windows 11 las redondea solo (DWM, el mismo redondeo y borde que el resto de ventanas). En Windows 10,
+        que no lo hace, se recorta la ventana con una región de esquinas redondeadas parecidas."""
+        if not self.hwnd:
+            return
+        self.root.update_idletasks()   # Tk debe terminar de colocar la ventana antes de cambiar su forma
+        if sys.getwindowsversion().build >= 22000:
+            user32.SetWindowRgn(self.hwnd, None, True)
+        else:
+            r = px(16)
+            user32.SetWindowRgn(self.hwnd, gdi32.CreateRoundRectRgn(0, 0, ancho + 1, alto + 1, r, r), True)
+
     def apply_window_style(self) -> None:
         hwnd = user32.GetParent(self.root.winfo_id())
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
@@ -913,11 +1211,12 @@ class Anuiki:
         dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR,
                                      ctypes.byref(color), ctypes.sizeof(color))
         self.hwnd = hwnd
+        self._aplicar_forma(self.root.winfo_width(), self.root.winfo_height())
         if self.demo:
             self.visible = True
         else:
             user32.ShowWindow(hwnd, SW_HIDE)   # arranca oculta: aparece con el atajo
-            self.root.attributes("-alpha", 1.0)
+            self.aplicar_opacidad()
             if self.state in ("descargando", "descarga_fallida"):
                 self.show()
 
@@ -943,76 +1242,58 @@ class Anuiki:
         widget.bind("<Button-3>", lambda e: self.menu.tk_popup(e.x_root, e.y_root))
 
     def drag_start(self, e) -> None:
+        self._arrastrando = True
         if self.state == "descarga_fallida":
             self.retry_download()
         self._dx = e.x_root - self.root.winfo_x()
         self._dy = e.y_root - self.root.winfo_y()
 
     def drag_move(self, e) -> None:
+        if not self._arrastrando:
+            return
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
     # ------------------------------------------------------------ UI
     def build_ui(self) -> None:
-        self.bar = tk.Frame(self.root, bg=BG, height=px(PILL_H))
-        self.bar.pack(fill="x", side="bottom")
-        self.bar.pack_propagate(False)
-
-        self.canvas = tk.Canvas(self.bar, width=px(44), height=px(44), bg=BG, highlightthickness=0)
-        self.canvas.pack(side="left", padx=(px(14), px(12)))
-
-        # El botón de expandir se coloca primero a la derecha: reserva su sitio y nunca se corta,
-        # por largo que sea el texto (que es lo que se recorta si hace falta).
-        self.hbtn = tk.Canvas(self.bar, width=px(36), height=px(36), bg=BG,
-                              highlightthickness=0, cursor="hand2")
-        self.hbtn.pack(side="right", padx=(0, px(14)))
-        self.hbtn.bind("<Enter>", lambda e: self.draw_hbtn(hover=True))
-        self.hbtn.bind("<Leave>", lambda e: self.draw_hbtn(hover=False))
-        self.hbtn.bind("<Button-1>", lambda e: self.toggle_history())
-
-        texts = tk.Frame(self.bar, bg=BG)
-        texts.pack(side="left", fill="both", expand=True)
-        texts.pack_propagate(False)
-        self.title = tk.Label(texts, text="", bg=BG, fg=TEXT, font=self.f_title, anchor="w")
-        self.title.pack(anchor="w", pady=(px(11), 0))
-        self.subtitle = tk.Label(texts, text="", bg=BG, fg=TEXT_3, font=self.f_sub, anchor="w")
-        self.subtitle.pack(anchor="w")
-
-        for w in (self.bar, self.canvas, texts, self.title, self.subtitle):
-            self.bind_drag(w)
+        self.zonas: list = []          # zonas clicables de la barra: (x1, y1, x2, y2, nombre), en px lógicos
+        self._hover = None
+        self._arrastrando = False
+        self._img_cache: dict = {}
+        self._bar = {"texto": "", "color": TEXT, "chevron": True, "cap_w": 0.0, "onda_w": 0.0}
+        self._bar_w = BAR_MIN_W
+        self.canvas = tk.Canvas(self.root, bg=BG, highlightthickness=0, height=px(PILL_H))
+        self.canvas.pack(fill="x", side="bottom")
+        self.canvas.bind("<ButtonPress-1>", self.bar_press)
+        self.canvas.bind("<B1-Motion>", self.drag_move)
+        self.canvas.bind("<Motion>", lambda e: self._set_hover(self._zona_en(e)))
+        self.canvas.bind("<Leave>", lambda e: self._set_hover(None))
+        self.canvas.bind("<Button-3>", lambda e: self.menu.tk_popup(e.x_root, e.y_root))
 
         self.panel = tk.Frame(self.root, bg=BG)
         self.render_state()
         self.relayout()
 
-    def _hbtn_image(self, fill: str, up: bool):
-        """Botón circular con chevrón, suavizado (Tk no aplica antialiasing a óvalos)."""
-        cache = self.__dict__.setdefault("_hbtn_cache", {})
-        key = (fill, up)
-        if key not in cache:
-            from PIL import Image, ImageDraw, ImageTk
+    def _zona_en(self, e):
+        x, y = e.x / S, e.y / S
+        for x1, y1, x2, y2, nombre in self.zonas:
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                return nombre
+        return None
 
-            size, k = px(36), 4
-            n = size * k
-            u = n / 36  # unidad lógica en el lienzo supermuestreado
-            img = Image.new("RGBA", (n, n), BG)
-            d = ImageDraw.Draw(img)
-            d.ellipse((0, 0, n - 1, n - 1), fill=fill)
-            dy = -5.5 if up else 5.5  # el chevrón apunta hacia arriba o hacia abajo
-            pts = [(12.5 * u, (18 - dy / 2) * u), (18 * u, (18 + dy / 2) * u), (23.5 * u, (18 - dy / 2) * u)]
-            w = 1.9 * u
-            d.line(pts, fill=PURPLE, width=round(w), joint="curve")
-            for x, y in (pts[0], pts[2]):  # extremos redondeados
-                d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=PURPLE)
-            cache[key] = ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS),
-                                            master=self.root)
-        return cache[key]
+    def _set_hover(self, nombre) -> None:
+        if nombre != self._hover:
+            self._hover = nombre
+            self.canvas.config(cursor="hand2" if nombre else "")
 
-    def draw_hbtn(self, hover: bool = False) -> None:
-        c = self.hbtn
-        c.delete("all")
-        fill = TONAL_HOVER if hover or self.show_history else TONAL
-        img = self._hbtn_image(fill, up=not self.show_history)
-        c.create_image(0, 0, image=img, anchor="nw")
+    def bar_press(self, e) -> None:
+        zona = self._zona_en(e)
+        self._arrastrando = False
+        if zona == "ajustes":
+            self.open_settings()
+        elif zona == "historial":
+            self.toggle_history()
+        else:
+            self.drag_start(e)
 
     def relayout(self) -> None:
         self.render_state()          # recalcula ancho y recorte de texto para el modo actual (pequeño/expandido)
@@ -1024,8 +1305,7 @@ class Anuiki:
             self.build_history()
             width = px(PANEL_W)
         else:
-            width = getattr(self, "_pill_width", px(PILL_W))
-        self.draw_hbtn()
+            width = px(self._bar_w)
 
         self.root.update_idletasks()
         height = px(PILL_H) + (self.panel.winfo_reqheight() + px(14) if self.show_history else 0)
@@ -1039,18 +1319,14 @@ class Anuiki:
             x = cx - width // 2
         x = max(0, min(x, sw - width))                       # nunca fuera de la pantalla
         self.root.geometry(f"{width}x{height}+{x}+{max(0, bottom - height)}")
+        self._aplicar_forma(width, height)
 
     def build_history(self) -> None:
         head = tk.Frame(self.panel, bg=BG)
         head.pack(fill="x", pady=(0, px(8)))
         tk.Label(head, text="Historial", bg=BG, fg=TEXT, font=self.f_title).pack(side="left")
-        gear = tk.Label(head, text=IC_GEAR, bg=BG, fg=TEXT_2, font=(ICONS, 11), cursor="hand2")
-        gear.pack(side="right")
-        gear.bind("<Button-1>", lambda e: self.open_settings())
-        gear.bind("<Enter>", lambda e: gear.config(fg=PURPLE))
-        gear.bind("<Leave>", lambda e: gear.config(fg=TEXT_2))
         tk.Label(head, text="Clic para escribir en el campo", bg=BG, fg=TEXT_3,
-                 font=self.f_meta).pack(side="right", padx=px(10))
+                 font=self.f_meta).pack(side="right")
         if not self.history:
             tk.Label(self.panel, text="Aún no hay transcripciones.", bg=BG, fg=TEXT_2,
                      font=self.f_sub, anchor="w").pack(fill="x", pady=px(8))
@@ -1102,40 +1378,90 @@ class Anuiki:
                 hi = mid - 1
         return text[:lo].rstrip() + "…"
 
-    def _ajustar_ancho(self, title: str, sub: str) -> tuple[str, str]:
-        """Calcula el ancho de la barra pequeña para que el texto y el botón quepan siempre."""
-        medida_titulo = "Escuchando  ·  00:00" if self.state == "grabando" else title
-        texto = max(self.f_title.measure(medida_titulo), self.f_sub.measure(sub)) + px(6)
-        ancho = min(max(px(PILL_W), px(PILL_FIJO) + texto), px(PILL_MAX_W))
-        self._pill_width = ancho
-        disponible = (px(PANEL_W) if self.show_history else ancho) - px(PILL_FIJO)   # ancho real de la barra
-        if not self.show_history and hasattr(self, "_placed") and self.root.winfo_width() != ancho:
-            sw = self.root.winfo_screenwidth()
-            cx = self.root.winfo_x() + self.root.winfo_width() // 2
-            x = max(0, min(cx - ancho // 2, sw - ancho))
-            self.root.geometry(f"{ancho}x{self.root.winfo_height()}+{x}+{self.root.winfo_y()}")
-        return (self._recortar(title, self.f_title, disponible),
-                self._recortar(sub, self.f_sub, disponible))
+    def _lw(self, font, texto: str) -> float:
+        """Ancho del texto en px lógicos."""
+        return font.measure(texto) / S
 
     def render_state(self) -> None:
+        """Decide qué muestra la barra (texto corto, atajos) y su ancho; el dibujo lo hace animate()."""
         dictate = pretty_hotkey(self.cfg["hotkey_dictate"])
-        hide = pretty_hotkey(self.cfg["hotkey_hide"]) if self.cfg["hotkey_hide"] else ""
-        texts = {
-            "cargando": ("Preparando…", f"Cargando {MODELS[self.cfg['model']]['name']}"),
-            "descargando": ("Descargando modelo de voz", self.progress_text or "Conectando…"),
-            "descarga_fallida": ("Clic para reintentar", self.fail_msg),
-            "listo": ("Listo para dictar", f"{dictate} para empezar"),
-            "grabando": ("Escuchando", "Sin señal: activa el micrófono" if self.mic_silencio else
-                         (pretty_hotkey("space") if self.cfg.get("espacio_para_detener", True) else dictate)
-                         + " para terminar" + (f" · {hide} cancela" if hide else "")),
-            "sin_audio": ("La grabación está vacía", "Activa el micrófono e inténtalo de nuevo"),
-            "transcribiendo": ("Transcribiendo", "Un momento…"),
-            "error": ("Algo falló", "Revisa anuiki.log"),
-        }
-        title, sub = texts.get(self.state, ("", ""))
-        title, sub = self._ajustar_ancho(title, sub)
-        self.title.config(text=title, fg=ERROR if self.state in ("error", "descarga_fallida", "sin_audio") else TEXT)
-        self.subtitle.config(text=sub, fg=ERROR if self.state == "grabando" and self.mic_silencio else TEXT_3)
+        st = self.state
+        sin_mic = "Micrófono apagado" if self.mic_estado == "apagado" else "Sin micrófono"
+        texto, color = "", TEXT
+        if st == "grabando":
+            if self.mic_problema:
+                texto, color = sin_mic, ERROR
+            elif self.mic_silencio:
+                texto, color = "Sin señal", ERROR
+        elif st == "cargando":
+            texto, color = "Preparando…", TEXT_2
+        elif st == "descargando":
+            texto = f"Descargando {int(self.progress * 100)} %" if self.progress > 0 else "Conectando…"
+        elif st == "descarga_fallida":
+            texto, color = self.fail_msg or "Clic para reintentar", ERROR
+        elif st == "listo":
+            texto, color = (sin_mic, ERROR) if self.mic_problema else (dictate, TEXT)
+        elif st == "sin_audio":
+            texto, color = ("No se escuchó nada" if self.mic_estuvo_apagado else "Grabación vacía"), ERROR
+        elif st == "transcribiendo":
+            texto = "Transcribiendo…"
+        elif st == "error":
+            texto, color = "Algo falló", ERROR
+
+        f_t = self.fonts["tiempo"]
+        pad = PILL_PAD
+        chevron = st != "grabando"
+        derecha = PILL_PAD_R + 24 + (26 if chevron else 0)
+        tw = self._lw(f_t, "00:00")
+        cap_w = onda_w = 0.0
+        if st == "grabando":
+            if texto:        # con aviso (micrófono apagado, sin señal) la cápsula se ajusta a su contenido y el aviso va al lado
+                onda_w = 36.0
+                cap_w = 12 + onda_w + 8 + tw + 12
+                izq = pad + cap_w + 8 + self._lw(f_t, texto)
+            else:
+                izq = 0.0
+        else:
+            maximo = BAR_MAX_W - (pad + 24 + 8) - PILL_GAP - derecha
+            texto = self._recortar(texto, f_t, px(maximo))
+            izq = pad + 24 + 8 + self._lw(f_t, texto)
+        self._bar_w = min(BAR_MAX_W, max(BAR_MIN_W, izq + PILL_GAP + derecha))
+        if st == "grabando" and not texto:       # sin avisos: la cápsula ocupa todo el hueco hasta el botón
+            cap_w = self._bar_w - pad - PILL_GAP - derecha
+            onda_w = cap_w - 12 - 8 - tw - 12
+        self._bar = {"texto": texto, "color": color, "chevron": chevron, "cap_w": cap_w, "onda_w": onda_w}
+        self._aplicar_ancho()
+
+    def _aplicar_ancho(self) -> None:
+        """Ajusta el ancho de la barra pequeña al contenido, manteniendo su centro."""
+        if self.show_history or not hasattr(self, "_placed"):
+            return
+        ancho = px(self._bar_w)
+        if self.root.winfo_width() == ancho:
+            return
+        sw = self.root.winfo_screenwidth()
+        cx = self.root.winfo_x() + self.root.winfo_width() // 2
+        x = max(0, min(cx - ancho // 2, sw - ancho))
+        alto = self.root.winfo_height()
+        self.root.geometry(f"{ancho}x{alto}+{x}+{self.root.winfo_y()}")
+        self._aplicar_forma(ancho, alto)
+
+    def on_mic_estado(self, estado: str) -> None:
+        """El micrófono se activó, se apagó o se desconectó: la barra lo refleja al momento."""
+        anterior, self.mic_estado = self.mic_estado, estado
+        if estado == anterior:
+            return
+        if estado != "ok" and self.state == "grabando":
+            self.mic_estuvo_apagado = True
+        log.info("Micrófono: %s", {"ok": "activo", "apagado": "apagado", "ausente": "no disponible"}[estado])
+        if estado == "ok" and self.state == "sin_audio":
+            self.set_state("listo")    # ya lo activó: el aviso de grabación vacía deja de tener sentido
+        else:
+            self.render_state()
+
+    @property
+    def mic_problema(self) -> bool:
+        return self.mic_estado != "ok"
 
     def set_state(self, state: str) -> None:
         self.state = state
@@ -1149,53 +1475,105 @@ class Anuiki:
             self.start_recording()
 
     def animate(self) -> None:
+        self.dibujar_barra()
+        self.root.after(33, self.animate)
+
+    def _img_nueva(self, w: float, h: float, dibujar):
+        """Imagen suavizada: se dibuja con PIL a 4x y se reduce (w y h en px lógicos)."""
+        from PIL import Image, ImageDraw, ImageTk
+
+        k = 4
+        pw, ph = max(1, px(w)), max(1, px(h))
+        grande = Image.new("RGBA", (pw * k, ph * k), (255, 255, 255, 0))
+        dibujar(ImageDraw.Draw(grande), pw * k / w)
+        return ImageTk.PhotoImage(grande.resize((pw, ph), Image.LANCZOS), master=self.root)
+
+    def _img(self, clave, w: float, h: float, dibujar):
+        """Igual que _img_nueva, pero guardada: para lo que no cambia entre fotogramas."""
+        img = self._img_cache.get(clave)
+        if img is None:
+            img = self._img_cache[clave] = self._img_nueva(w, h, dibujar)
+        return img
+
+    def dibujar_barra(self) -> None:
         c = self.canvas
         c.delete("all")
         t = time.perf_counter() - self.anim_t0
-        cx, cy = 22, 22   # coordenadas lógicas; se escalan al final
-        if self.state == "grabando":
+        W = PANEL_W if self.show_history else self._bar_w
+        H = PILL_H
+        cy = H / 2
+        info, st = self._bar, self.state
+        f_t = self.fonts["tiempo"]
+        zonas = []
+        self._fotograma = []         # referencias: Tk no conserva las imágenes si Python las libera
+        x = PILL_PAD
+        if st == "grabando":
+            cap_w, onda_w = info["cap_w"], info["onda_w"]
+            c.create_image(x, cy - 12, anchor="nw", image=self._img(
+                ("cap", round(cap_w, 1)), cap_w, 24,
+                lambda d, u: d.rounded_rectangle((0, 0, cap_w * u - 1, 24 * u - 1), radius=12 * u, fill=TONAL)))
             self.levels.append(min(1.0, self.level * 18))
-            c.create_oval(0, 0, 44, 44, fill=TONAL, outline="")
-            for i, lv in enumerate(self.levels):
-                x = 8.5 + i * 4.5
+            n = max(6, int((onda_w - 2.4) / 4.2) + 1)
+            paso = (onda_w - 2.4) / (n - 1)
+            niveles = list(self.levels)[-n:]
+            alturas = []
+            for i, lv in enumerate(niveles):
                 idle = 0.12 + 0.08 * math.sin(t * 6 + i * 0.9)
-                h = 4 + 22 * max(lv * (0.55 + 0.45 * math.sin(i * 1.3 + t * 5) ** 2), idle)
-                c.create_line(x, cy - h / 2, x, cy + h / 2, fill=PURPLE, width=2.4 * S,
-                              capstyle="round")
+                alturas.append(4 + 14 * max(lv * (0.55 + 0.45 * math.sin(i * 1.3 + t * 5) ** 2), idle))
+
+            def onda(d, u) -> None:
+                for i, h in enumerate(alturas):
+                    bx = 1.2 + i * paso
+                    d.rounded_rectangle(((bx - 1.2) * u, (12 - h / 2) * u, (bx + 1.2) * u, (12 + h / 2) * u),
+                                        radius=1.2 * u, fill=PURPLE)
+
+            img = self._img_nueva(onda_w, 24, onda)
+            self._fotograma.append(img)
+            c.create_image(x + 12, cy - 12, anchor="nw", image=img)
             s = int(time.perf_counter() - self.rec_start)
-            self.title.config(text=f"Escuchando  ·  {s // 60}:{s % 60:02d}")
+            c.create_text(x + 12 + onda_w + 8, cy, text=f"{s // 60}:{s % 60:02d}", anchor="w", font=f_t, fill=TEXT)
+            x += cap_w + PILL_GAP
+            if info["texto"]:
+                c.create_text(x, cy, text=info["texto"], anchor="w", font=f_t, fill=info["color"])
             sin_senal = (time.perf_counter() - self.rec_start > AVISO_SIN_SENAL_S and self.peak < PICO_SILENCIO)
             if sin_senal != self.mic_silencio:
                 self.mic_silencio = sin_senal
                 self.render_state()
-        elif self.state == "descargando":
-            r = 15
-            c.create_oval(cx - r, cy - r, cx + r, cy + r, outline=TRACK, width=3.5 * S)
-            if self.progress > 0:
-                c.create_arc(cx - r, cy - r, cx + r, cy + r, start=90,
-                             extent=-max(1.0, 359.9 * self.progress),
-                             style="arc", outline=PURPLE, width=3.5 * S)
-        elif self.state in ("transcribiendo", "cargando"):
-            color = PURPLE if self.state == "transcribiendo" else TEXT_3
-            r = 15
-            c.create_oval(cx - r, cy - r, cx + r, cy + r, outline=TRACK, width=3.5 * S)
-            rot = (t * 300) % 360
-            sweep = 40 + 230 * (0.5 - 0.5 * math.cos(t * 3.2))
-            c.create_arc(cx - r, cy - r, cx + r, cy + r, start=-rot, extent=sweep,
-                         style="arc", outline=color, width=3.5 * S)
-        elif self.state == "descarga_fallida":
-            c.create_oval(0, 0, 44, 44, fill="#FCE8E6", outline="")
-            c.create_text(cx, cy, text=IC_RETRY, font=(ICONS, 13), fill=ERROR)
-        elif self.state in ("error", "sin_audio"):
-            c.create_oval(0, 0, 44, 44, fill="#FCE8E6", outline="")
-            c.create_text(cx, cy, text=IC_WARN, font=(ICONS, 13), fill=ERROR)
         else:
-            pulse = 0.5 + 0.5 * math.sin(t * 2)
-            c.create_oval(0, 0, 44, 44, fill=mix(TONAL, LILAC, 0.25 * pulse), outline="")
-            c.create_oval(5, 5, 39, 39, fill=PURPLE, outline="")
-            c.create_text(cx, cy, text=IC_MIC, font=(ICONS, 12), fill="#FFFFFF")
+            ix = x + 12
+            if st == "descargando":
+                img = self._img_nueva(26, 26, _dib_anillo(PURPLE, 270, 270 + max(4.0, 359.9 * self.progress)))
+            elif st in ("transcribiendo", "cargando"):
+                rot = (t * 300) % 360
+                sweep = 40 + 230 * (0.5 - 0.5 * math.cos(t * 3.2))
+                img = self._img_nueva(26, 26, _dib_anillo(PURPLE if st == "transcribiendo" else TEXT_3, rot - sweep, rot))
+            elif st == "descarga_fallida":
+                img = self._img(("icono", "reintentar"), 24, 24, _dib_reintentar)
+            elif st in ("error", "sin_audio") or (st == "listo" and self.mic_problema):
+                img = self._img(("icono", "aviso"), 24, 24, _dib_aviso)
+            else:
+                img = self._img(("icono", "mic"), 24, 24, _dib_mic)
+            self._fotograma.append(img)
+            c.create_image(ix, cy, image=img)
+            c.create_text(x + 24 + 8, cy, text=info["texto"], anchor="w", font=f_t, fill=info["color"])
+
+        # Botones de la derecha: historial (opcional) y configuración
+        def boton(nombre: str, bx: float) -> tuple[float, bool]:
+            hover = self._hover == nombre
+            if hover:
+                c.create_image(bx, cy, anchor="w", image=self._img(("hover",), 24, 24, _dib_circulo(TONAL_HOVER)))
+            zonas.append((bx, cy - 12, bx + 24, cy + 12, nombre))
+            return bx + 12, hover
+
+        gx = W - PILL_PAD_R - 24
+        mx, hover = boton("ajustes", gx)
+        c.create_text(mx, cy, text=IC_GEAR, font=(ICONS, 10), fill=PURPLE if hover else TEXT_2)
+        if info["chevron"]:
+            mx, hover = boton("historial", gx - 26)
+            c.create_image(mx, cy, image=self._img(("chevron", self.show_history), 24, 24,
+                                                   _dib_chevron(arriba=not self.show_history)))
+        self.zonas = zonas
         c.scale("all", 0, 0, S, S)
-        self.root.after(33, self.animate)
 
     def _fake_level(self) -> None:
         self.level = abs(math.sin(time.perf_counter() * 3)) * 0.04
@@ -1255,6 +1633,8 @@ class Anuiki:
                     self.on_esc()
                 elif kind == "space_stop":
                     self.on_space_stop()
+                elif kind == "mic":
+                    self.on_mic_estado(ev[1])
                 elif kind == "state":
                     self.set_state(ev[1])
                 elif kind == "result":
@@ -1294,6 +1674,8 @@ class Anuiki:
                         self.toggle_history()
                 elif kind == "settings":
                     self.open_settings()
+                elif kind == "guia":
+                    self.open_settings("uso")
                 elif kind == "quit":
                     self.quit()
                     return
@@ -1359,7 +1741,14 @@ class Anuiki:
         self.level = 0.0
         self.peak = 0.0
         self.mic_silencio = False
+        self.mic_estuvo_apagado = self.mic_problema
         self.dictado = None
+        # La barra pasa a «grabando» ya, antes del tono: si no, se quedaría con el aspecto anterior
+        # (y otro ancho) mientras suena y daría un salto al empezar.
+        self.rec_start = time.perf_counter()
+        self.set_state("grabando")
+        self.dibujar_barra()
+        self.root.update_idletasks()
         if self.cfg.get("sound", True):
             sonidos.reproducir("inicio", bloqueante=True)   # antes de abrir el micrófono: no se graba el tono
         if self.cfg.get("segmentos", True):
@@ -1377,10 +1766,12 @@ class Anuiki:
                 self.dictado = None
             self.set_state("error")
             return
-        self.rec_start = time.perf_counter()
-        self.set_state("grabando")
+        self.rec_start = time.perf_counter()    # el contador empieza cuando el micrófono ya escucha
+        self.peak = 0.0
 
     def stop_recording(self, cancel: bool = False) -> None:
+        if self.stream is None:       # aún suena el tono de inicio: no hay nada que detener
+            return
         try:
             self.stream.stop()
             self.stream.close()
@@ -1445,6 +1836,11 @@ class Anuiki:
             self.insert_text(text, self.target_hwnd)
             if self.cfg.get("sound", True):
                 sonidos.reproducir("fin")   # la transcripción terminó
+        elif self.mic_estuvo_apagado:
+            log.warning("Transcripción vacía: el micrófono estuvo apagado durante la grabación")
+            self.set_state("sin_audio")
+            self.root.after(AVISO_VACIA_S * 1000, lambda: self.set_state("listo") if self.state == "sin_audio" else None)
+            return
         self.set_state("listo")
         if self.show_history:
             self.relayout()
@@ -1484,6 +1880,7 @@ class Anuiki:
                 pystray.MenuItem("Reintentar descarga del modelo", lambda: self.events.put(("retry",)),
                                  visible=lambda item: self.state == "descarga_fallida"),
                 pystray.MenuItem("Historial", lambda: self.events.put(("tray_history",)), default=True),
+                pystray.MenuItem("Cómo usar Anuiki", lambda: self.events.put(("guia",))),
                 pystray.MenuItem("Configuración", lambda: self.events.put(("settings",))),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Salir", lambda: self.events.put(("quit",))),
@@ -1497,6 +1894,8 @@ class Anuiki:
         if self.tray:
             self.tray.stop()
         keyboard.unhook_all()
+        if self.vigilante_mic:
+            self.vigilante_mic.detener()
         if self.stream:
             self.stream.close()
         self.root.destroy()

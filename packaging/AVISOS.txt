@@ -1,4 +1,4 @@
-Anuiki 1.3.0 — Dictado por voz local para Windows
+Anuiki 1.3.1 — Dictado por voz local para Windows
 ==================================================
 
 Uso (atajos por defecto; se cambian en Configuración)
@@ -29,6 +29,11 @@ Modelo de voz: NVIDIA Parakeet TDT 0.6B v3
   https://creativecommons.org/licenses/by/4.0/
 Conversión ONNX del modelo: istupakov/parakeet-tdt-0.6b-v3-onnx (CC BY 4.0)
   https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx
+
+Tipografía: Manrope
+  (c) 2018 The Manrope Project Authors — SIL Open Font License 1.1
+  https://github.com/googlefonts/manrope
+  https://openfontlicense.org
 
 Componentes de software:
   onnx-asr (MIT), ONNX Runtime (MIT), NumPy (BSD), sounddevice (MIT),

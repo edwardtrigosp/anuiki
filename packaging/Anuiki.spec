@@ -9,6 +9,7 @@ APP_DIR = os.path.join(SPECPATH, '..', 'app')
 datas = []
 datas += collect_data_files('onnx_asr')
 datas += copy_metadata('onnx-asr')
+datas += [(os.path.join(APP_DIR, 'assets', 'fonts'), 'assets/fonts')]   # tipografía Manrope (SIL OFL)
 
 
 a = Analysis(
@@ -16,7 +17,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=['pystray._win32'],
+    hiddenimports=['pystray._win32', 'microfono', 'pycaw.pycaw', 'comtypes.stream'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

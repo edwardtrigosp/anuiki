@@ -3,7 +3,7 @@
    a tus instaladores reales (ej. carpeta /downloads o
    GitHub Releases).
    ========================================================= */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 
 const PLATFORMS = [
   {
@@ -22,6 +22,16 @@ const PLATFORMS = [
    Se muestran las 3 primeras; el resto queda plegado.
    ========================================================= */
 const NOVEDADES = [
+  {
+    version: "1.3.1",
+    fecha: "9 de noviembre de 2026",
+    cambios: [
+      "Barra rediseñada: más pequeña y redondeada, con la onda de voz, el tiempo de grabación y un acceso directo a Configuración. Su opacidad se puede ajustar.",
+      "Avisa cuando el micrófono está apagado o desconectado, también antes de grabar, y te dice si no se escuchó nada porque estuvo apagado.",
+      "Nueva guía de uso con los atajos (Ctrl+Espacio, Espacio y Esc). Se abre sola la primera vez y siempre desde el engranaje de la barra.",
+      "Tipografía libre Manrope e iconos más nítidos en toda la aplicación.",
+    ],
+  },
   {
     version: "1.3.0",
     fecha: "9 de noviembre de 2026",
