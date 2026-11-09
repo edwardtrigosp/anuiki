@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Anuiki — Dictado por voz local para Windows</title>
-  <meta name="description" content="Dicta en español y escribe tus prompts para asistentes de código con la voz. Pulsa Ctrl+T y habla. Gratis para Windows, 100% local y privado." />
+  <meta name="description" content="Dicta en español y escribe tus prompts para asistentes de código con la voz. Pulsa Ctrl+Espacio y habla. Gratis para Windows, 100% local y privado." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -21,6 +21,7 @@
       </a>
       <nav class="nav__links">
         <a href="#features">Beneficios</a>
+        <a href="#novedades">Novedades</a>
         <a href="#download">Descargar</a>
         <a href="#faq">Preguntas</a>
       </nav>
@@ -32,9 +33,9 @@
   <section class="hero">
     <div class="container hero__inner">
       <div class="hero__copy reveal">
-        <span class="pill">Nueva versión <strong id="version-pill">v1.1.0</strong></span>
+        <span class="pill">Nueva versión <strong id="version-pill">v1.3.0</strong></span>
         <h1>Dicta en español, <span class="underline">programa</span> con tu voz.</h1>
-        <p class="lead">Pulsa Ctrl+T, habla y tu voz se transcribe a español en el campo activo: ideal para escribir prompts largos para asistentes de código como Claude Code. Todo en tu equipo, sin enviar audio a ningún servidor.</p>
+        <p class="lead">Pulsa Ctrl+Espacio, habla, pulsa Espacio para terminar y tu voz se transcribe a español en el campo activo: ideal para escribir prompts largos para asistentes de código como Claude Code. Todo en tu equipo, sin enviar audio a ningún servidor.</p>
         <div class="hero__cta">
           <a id="primary-download" href="#download" class="btn btn--light btn--lg">
             <span id="primary-icon" class="btn__icon"></span>
@@ -58,14 +59,14 @@
               <div class="pillbar">
                 <span class="pillbar__mic">🎙️</span>
                 <span class="pillbar__wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-                <span class="pillbar__txt">Escuchando… <small>Ctrl+T</small></span>
+                <span class="pillbar__txt">Escuchando… <small>Espacio para terminar</small></span>
               </div>
             </div>
           </div>
           <div class="laptop__base"></div>
         </div>
         <div class="float-card float-card--1">🔒 Audio 100% local</div>
-        <div class="float-card float-card--2">⌨️ Ctrl+T y listo</div>
+        <div class="float-card float-card--2">⌨️ Ctrl+Espacio y listo</div>
       </div>
     </div>
   </section>
@@ -93,9 +94,18 @@
         <article class="feature reveal">
           <div class="feature__icon">🤖</div>
           <h3>Ideal para programar con IA</h3>
-          <p>Dicta tus prompts sin quitar las manos del flujo. Ctrl+T dicta, Esc oculta la barra y el historial guarda lo dictado.</p>
+          <p>Dicta tus prompts sin quitar las manos del flujo. Ctrl+Espacio empieza a dictar, Espacio termina, Esc cancela y el historial guarda lo dictado.</p>
         </article>
       </div>
+    </div>
+  </section>
+
+  <!-- Novedades (se genera desde NOVEDADES en script.js) -->
+  <section id="novedades" class="section section--soft">
+    <div class="container container--narrow">
+      <h2 class="section__title reveal">Novedades</h2>
+      <p class="section__sub reveal">Lo que ha cambiado en cada versión de Anuiki.</p>
+      <div class="changelog" id="changelog"><!-- generado por JS --></div>
     </div>
   </section>
 
@@ -110,7 +120,7 @@
       <ol class="steps reveal">
         <li><span>1</span><div><strong>Instala</strong><p>Descarga y abre el instalador.</p></div></li>
         <li><span>2</span><div><strong>Descarga el modelo</strong><p>La primera vez baja unos 650 MB (una sola vez).</p></div></li>
-        <li><span>3</span><div><strong>Dicta</strong><p>Pulsa Ctrl+T, habla y listo.</p></div></li>
+        <li><span>3</span><div><strong>Dicta</strong><p>Pulsa Ctrl+Espacio, habla y pulsa Espacio para terminar.</p></div></li>
       </ol>
     </div>
   </section>
@@ -138,7 +148,7 @@
         </details>
         <details class="reveal">
           <summary>¿Cómo actualizo a una nueva versión?</summary>
-          <p>Descarga la última versión desde esta página e instálala encima de la anterior.</p>
+          <p>Descarga la última versión desde esta página e instálala encima de la anterior. Tus ajustes se conservan. En <a href="#novedades">Novedades</a> ves qué cambia en cada versión.</p>
         </details>
       </div>
     </div>

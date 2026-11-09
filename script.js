@@ -3,7 +3,7 @@
    a tus instaladores reales (ej. carpeta /downloads o
    GitHub Releases).
    ========================================================= */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.3.0";
 
 const PLATFORMS = [
   {
@@ -15,6 +15,59 @@ const PLATFORMS = [
     icon: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>`,
   },
 ];
+
+/* =========================================================
+   NOVEDADES — añade la versión nueva ARRIBA del todo.
+   Cada entrada: versión, fecha y 2-4 viñetas cortas.
+   Se muestran las 3 primeras; el resto queda plegado.
+   ========================================================= */
+const NOVEDADES = [
+  {
+    version: "1.3.0",
+    fecha: "9 de noviembre de 2026",
+    cambios: [
+      "Al dictar en una terminal (Windows Terminal, PowerShell, cmd…), el texto se envía solo con Enter. Ideal para Claude Code u OpenCode. Se puede desactivar en Configuración.",
+      "Ahora puedes detener la grabación pulsando solo Espacio, sin repetir el atajo de inicio. Se puede desactivar en Configuración.",
+      "Nuevo atajo por defecto: Ctrl+Espacio para empezar a dictar, Espacio para terminar y Esc para cancelar. La barra muestra estos atajos mientras grabas.",
+      "Aviso de micrófono sin señal: si está silenciado o desconectado, la barra te pide activarlo y, si la grabación queda vacía, te lo indica.",
+    ],
+  },
+  {
+    version: "1.2.0",
+    fecha: "8 de noviembre de 2026",
+    cambios: [
+      "Transcripción mientras hablas: Anuiki trabaja por trozos durante la grabación, así que al terminar casi no hay espera.",
+      "Sonidos nuevos, suaves y discretos, al empezar a grabar y al terminar de transcribir.",
+      "La barra se ajusta al texto, ya no se corta y nunca queda fuera de la pantalla.",
+    ],
+  },
+  {
+    version: "1.0.0 – 1.1.0",
+    fecha: "7 de noviembre de 2026",
+    cambios: [
+      "Primeras versiones: dictado en español con reconocimiento 100 % local, atajo global, icono en la bandeja y historial de dictados.",
+    ],
+  },
+];
+
+const changelog = document.getElementById("changelog");
+const entradaHTML = (n, i) => `
+  <article class="release reveal">
+    <header class="release__head">
+      <span class="release__ver">v${n.version}</span>
+      ${i === 0 ? '<span class="release__tag">Última</span>' : ""}
+      <time class="release__date">${n.fecha}</time>
+    </header>
+    <ul>${n.cambios.map((c) => `<li>${c}</li>`).join("")}</ul>
+  </article>`;
+const VISIBLES = 3;
+changelog.innerHTML =
+  NOVEDADES.slice(0, VISIBLES).map(entradaHTML).join("") +
+  (NOVEDADES.length > VISIBLES
+    ? `<details class="changelog__more"><summary>Ver versiones anteriores</summary>${NOVEDADES.slice(VISIBLES)
+        .map((n, i) => entradaHTML(n, i + VISIBLES))
+        .join("")}</details>`
+    : "");
 
 /* ---------- Detección del sistema operativo ---------- */
 function detectOS() {
