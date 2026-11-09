@@ -41,8 +41,12 @@ jobs:
           path: unsigned/Anuiki-Setup.exe
 
       # Requiere que SignPath apruebe el proyecto y definir estas variables/secretos
-      # en Settings > Secrets and variables > Actions.
+      # en Settings > Secrets and variables > Actions. Mientras no exista el secreto
+      # SIGNPATH_API_TOKEN se omite la firma y se publica el instalador sin firmar.
       - name: Firmar con SignPath
+        if: env.SIGNPATH_API_TOKEN != ''
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
         uses: signpath/github-action-submit-signing-request@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -58,6 +62,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" signed/Anuiki-Setup.exe `
+          if (Test-Path signed/Anuiki-Setup.exe) {
+            $exe = "signed/Anuiki-Setup.exe"; $nota = "Instalador firmado de Anuiki para Windows 10/11 (64 bits)."
+          } else {
+            $exe = "unsigned/Anuiki-Setup.exe"; $nota = "Instalador de Anuiki para Windows 10/11 (64 bits). Aún sin firma de código: SmartScreen puede mostrar un aviso."
+          }
+          gh release create "${{ github.ref_name }}" $exe `
             --title "Anuiki ${{ github.ref_name }}" `
-            --notes "Instalador firmado de Anuiki para Windows 10/11 (64 bits)."
+            --notes $nota

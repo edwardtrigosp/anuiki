@@ -1,7 +1,7 @@
 """Anuiki — dictado por voz local para Windows.
 
-Atajos (configurables): Ctrl+T dicta / detiene; Esc oculta la barra (y cancela
-si estaba escuchando). Flecha: historial; clic en un elemento lo escribe en el
+Atajos (configurables): Ctrl+Espacio empieza a dictar; Espacio detiene; Esc oculta
+la barra (y cancela si estaba escuchando). Flecha: historial; clic en un elemento lo escribe en el
 campo activo. Configuración: icono de la bandeja, clic derecho en la barra o
 engranaje del historial.
 
@@ -67,7 +67,7 @@ MODELS = {
 
 DEFAULT_CONFIG = {
     "model": "parakeet-v3",
-    "hotkey_dictate": "ctrl+t",
+    "hotkey_dictate": "ctrl+space",
     "hotkey_hide": "esc",
     "hotkey_history": "",
     "sound": True,
@@ -141,6 +141,10 @@ user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctyp
 SW_HIDE, SW_SHOWNOACTIVATE = 0, 4
 HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0010, 0x0040
+
+PICO_SILENCIO = 1e-4      # por debajo de este pico, el micrófono no está enviando señal (silenciado o desconectado)
+AVISO_SIN_SENAL_S = 1.5   # segundos de silencio total antes de avisar mientras se graba
+AVISO_VACIA_S = 6         # segundos que se muestra el aviso de «grabación vacía»
 
 TERMINAL_EXES = {
     "windowsterminal.exe", "wt.exe", "openconsole.exe", "conhost.exe", "cmd.exe",
@@ -757,6 +761,8 @@ class Anuiki:
         self.settings: SettingsWindow | None = None
         self.hotkey_handles = []
         self.space_handle = None
+        self.peak = 0.0            # pico de audio de la grabación en curso (0 = el micrófono no envía señal)
+        self.mic_silencio = False
         self.demo = os.environ.get("DICTADO_DEMO")
 
         self.root = tk.Tk()
@@ -1119,17 +1125,22 @@ class Anuiki:
             "descargando": ("Descargando modelo de voz", self.progress_text or "Conectando…"),
             "descarga_fallida": ("Clic para reintentar", self.fail_msg),
             "listo": ("Listo para dictar", f"{dictate} para empezar"),
-            "grabando": ("Escuchando", f"{dictate} para terminar" + (f" · {hide} cancela" if hide else "")),
+            "grabando": ("Escuchando", "Sin señal: activa el micrófono" if self.mic_silencio else
+                         (pretty_hotkey("space") if self.cfg.get("espacio_para_detener", True) else dictate)
+                         + " para terminar" + (f" · {hide} cancela" if hide else "")),
+            "sin_audio": ("La grabación está vacía", "Activa el micrófono e inténtalo de nuevo"),
             "transcribiendo": ("Transcribiendo", "Un momento…"),
             "error": ("Algo falló", "Revisa anuiki.log"),
         }
         title, sub = texts.get(self.state, ("", ""))
         title, sub = self._ajustar_ancho(title, sub)
-        self.title.config(text=title, fg=ERROR if self.state in ("error", "descarga_fallida") else TEXT)
-        self.subtitle.config(text=sub)
+        self.title.config(text=title, fg=ERROR if self.state in ("error", "descarga_fallida", "sin_audio") else TEXT)
+        self.subtitle.config(text=sub, fg=ERROR if self.state == "grabando" and self.mic_silencio else TEXT_3)
 
     def set_state(self, state: str) -> None:
         self.state = state
+        if state != "grabando":
+            self.mic_silencio = False
         self.update_space_stop()
         self.anim_t0 = time.perf_counter()
         self.render_state()
@@ -1153,6 +1164,10 @@ class Anuiki:
                               capstyle="round")
             s = int(time.perf_counter() - self.rec_start)
             self.title.config(text=f"Escuchando  ·  {s // 60}:{s % 60:02d}")
+            sin_senal = (time.perf_counter() - self.rec_start > AVISO_SIN_SENAL_S and self.peak < PICO_SILENCIO)
+            if sin_senal != self.mic_silencio:
+                self.mic_silencio = sin_senal
+                self.render_state()
         elif self.state == "descargando":
             r = 15
             c.create_oval(cx - r, cy - r, cx + r, cy + r, outline=TRACK, width=3.5 * S)
@@ -1171,7 +1186,7 @@ class Anuiki:
         elif self.state == "descarga_fallida":
             c.create_oval(0, 0, 44, 44, fill="#FCE8E6", outline="")
             c.create_text(cx, cy, text=IC_RETRY, font=(ICONS, 13), fill=ERROR)
-        elif self.state == "error":
+        elif self.state in ("error", "sin_audio"):
             c.create_oval(0, 0, 44, 44, fill="#FCE8E6", outline="")
             c.create_text(cx, cy, text=IC_WARN, font=(ICONS, 13), fill=ERROR)
         else:
@@ -1308,8 +1323,8 @@ class Anuiki:
             self.retry_download()
         elif self.state == "grabando":
             self.stop_recording()   # la barra sigue visible; solo el atajo de ocultar la oculta
-        elif self.state in ("listo", "error"):
-            if self.state == "error" and self.model is not None:
+        elif self.state in ("listo", "error", "sin_audio"):
+            if self.state in ("error", "sin_audio") and self.model is not None:
                 self.set_state("listo")
             self.show()
             if self.state == "listo":
@@ -1336,11 +1351,14 @@ class Anuiki:
         else:
             self.chunks.append(data.copy())
         self.level = float(np.sqrt(np.mean(data ** 2)))
+        self.peak = max(self.peak, float(np.max(np.abs(data))))
 
     def start_recording(self) -> None:
         self.target_hwnd = user32.GetForegroundWindow()
         self.chunks = []
         self.level = 0.0
+        self.peak = 0.0
+        self.mic_silencio = False
         self.dictado = None
         if self.cfg.get("sound", True):
             sonidos.reproducir("inicio", bloqueante=True)   # antes de abrir el micrófono: no se graba el tono
@@ -1373,6 +1391,13 @@ class Anuiki:
             if dictado is not None:
                 dictado.cancel()
             self.set_state("listo")
+            return
+        if time.perf_counter() - self.rec_start >= MIN_SECONDS and self.peak < PICO_SILENCIO:
+            log.warning("Grabación vacía: el micrófono no envió señal (pico=%.6f)", self.peak)
+            if dictado is not None:
+                dictado.cancel()
+            self.set_state("sin_audio")
+            self.root.after(AVISO_VACIA_S * 1000, lambda: self.set_state("listo") if self.state == "sin_audio" else None)
             return
         if dictado is not None:
             duration = time.perf_counter() - self.rec_start

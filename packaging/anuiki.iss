@@ -36,7 +36,7 @@ Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Crear un acceso directo en el escritorio"; GroupDescription: "Accesos directos:"
-Name: "startup"; Description: "Iniciar Anuiki con Windows (queda oculto esperando Ctrl+T)"; GroupDescription: "Opciones:"; Flags: unchecked
+Name: "startup"; Description: "Iniciar Anuiki con Windows (queda oculto esperando Ctrl+Espacio)"; GroupDescription: "Opciones:"; Flags: unchecked
 
 [Files]
 Source: "{#Root}\dist\Anuiki\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -58,7 +58,7 @@ Filename: "{app}\{#AppExe}"; Description: "Abrir {#AppName} ahora"; Flags: nowai
 Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 
 [Messages]
-es.FinishedLabel=Anuiki se instaló correctamente.%n%nUso: pulsa Ctrl+T en cualquier campo de texto para dictar, Ctrl+T otra vez para escribir el texto y Esc para ocultar la barra. Los atajos se cambian en Configuración (icono de la bandeja).%n%nLa primera vez descargará el modelo de voz (~670 MB).%n%nPara anclarlo a la barra de tareas: Inicio > busca "Anuiki" > clic derecho > "Anclar a la barra de tareas".
+es.FinishedLabel=Anuiki se instaló correctamente.%n%nUso: pulsa Ctrl+Espacio en cualquier campo de texto para dictar, Espacio para terminar y escribir el texto, y Esc para cancelar u ocultar la barra. Los atajos se cambian en Configuración (icono de la bandeja).%n%nLa primera vez descargará el modelo de voz (~670 MB).%n%nPara anclarlo a la barra de tareas: Inicio > busca "Anuiki" > clic derecho > "Anclar a la barra de tareas".
 
 [Code]
 // "Iniciar con Windows" también puede activarse desde la configuración de la

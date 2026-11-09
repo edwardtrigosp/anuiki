@@ -1,6 +1,6 @@
 # Anuiki
 
-Dictado por voz local para Windows: pulsas Ctrl+T, hablas y el texto se escribe en el campo activo.
+Dictado por voz local para Windows: pulsas Ctrl+Espacio, hablas, pulsas Espacio y el texto se escribe en el campo activo.
 Usa el modelo NVIDIA Parakeet TDT 0.6B v3 (ONNX), que se ejecuta en el propio equipo, sin enviar el audio a ningún servidor.
 
 ## Estructura

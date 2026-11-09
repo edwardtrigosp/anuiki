@@ -3,8 +3,8 @@ Anuiki 1.3.0 — Dictado por voz local para Windows
 
 Uso (atajos por defecto; se cambian en Configuración)
 ---
-  Ctrl+T          Aparece la barra y empieza a escuchar.
-  Ctrl+T (otra)   Deja de escuchar, transcribe y escribe el texto en el campo activo.
+  Ctrl+Espacio    Aparece la barra y empieza a escuchar.
+  Espacio         Deja de escuchar, transcribe y escribe el texto en el campo activo.
   Esc             Oculta la barra (si estaba escuchando, cancela).
   Flecha (^)      Historial: clic en un elemento para escribirlo en el campo activo.
   Bandeja         Icono junto al reloj: Historial, Configuración y Salir.

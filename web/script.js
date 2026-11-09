@@ -28,6 +28,8 @@ const NOVEDADES = [
     cambios: [
       "Al dictar en una terminal (Windows Terminal, PowerShell, cmd…), el texto se envía solo con Enter. Ideal para Claude Code u OpenCode. Se puede desactivar en Configuración.",
       "Ahora puedes detener la grabación pulsando solo Espacio, sin repetir el atajo de inicio. Se puede desactivar en Configuración.",
+      "Nuevo atajo por defecto: Ctrl+Espacio para empezar a dictar, Espacio para terminar y Esc para cancelar. La barra muestra estos atajos mientras grabas.",
+      "Aviso de micrófono sin señal: si está silenciado o desconectado, la barra te pide activarlo y, si la grabación queda vacía, te lo indica.",
     ],
   },
   {
